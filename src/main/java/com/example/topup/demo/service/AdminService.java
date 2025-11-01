@@ -1,0 +1,785 @@
+package com.example.topup.demo.service;
+
+import com.example.topup.demo.entity.User;
+import com.example.topup.demo.entity.BusinessDetails;
+import com.example.topup.demo.entity.Order;
+import com.example.topup.demo.entity.RetailerOrder;
+import com.example.topup.demo.entity.RetailerLimit;
+import com.example.topup.demo.dto.RetailerCreditLimitDTO;
+import com.example.topup.demo.dto.UpdateCreditLimitRequest;
+import com.example.topup.demo.repository.UserRepository;
+import com.example.topup.demo.repository.BusinessDetailsRepository;
+import com.example.topup.demo.repository.OrderRepository;
+import com.example.topup.demo.repository.RetailerOrderRepository;
+import com.example.topup.demo.repository.RetailerLimitRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.stereotype.Service;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+import java.util.stream.Collectors;
+
+@Service
+public class AdminService {
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private BusinessDetailsRepository businessDetailsRepository;
+
+    @Autowired
+    private OrderRepository orderRepository;
+
+    @Autowired
+    private RetailerOrderRepository retailerOrderRepository;
+
+    @Autowired
+    private RetailerLimitRepository retailerLimitRepository;
+
+    @Autowired
+    private EmailService emailService;
+
+    /**
+     * Get dashboard analytics data
+     */
+    public Map<String, Object> getDashboardAnalytics() {
+        Map<String, Object> analytics = new HashMap<>();
+        
+        // Basic user statistics
+        long totalUsers = userRepository.count();
+        long activeUsers = userRepository.countByAccountStatus(User.AccountStatus.ACTIVE);
+        long pendingApprovals = userRepository.countByAccountStatus(User.AccountStatus.PENDING_BUSINESS_APPROVAL);
+        long businessUsers = userRepository.countByAccountType(User.AccountType.BUSINESS);
+        long personalUsers = userRepository.countByAccountType(User.AccountType.PERSONAL);
+        
+        analytics.put("totalUsers", totalUsers);
+        analytics.put("activeUsers", activeUsers);
+        analytics.put("pendingApprovals", pendingApprovals);
+        analytics.put("businessUsers", businessUsers);
+        analytics.put("personalUsers", personalUsers);
+        
+        // Real revenue data from orders
+        double totalRevenue = calculateTotalRevenue();
+        double monthlyRevenue = calculateMonthlyRevenue();
+        double dailyRevenue = calculateDailyRevenue();
+        double revenueGrowth = calculateRevenueGrowth();
+        
+        analytics.put("totalRevenue", totalRevenue);
+        analytics.put("monthlyRevenue", monthlyRevenue);
+        analytics.put("dailyRevenue", dailyRevenue);
+        analytics.put("revenueGrowth", revenueGrowth);
+        
+        // User registration trends (last 7 days)
+        List<Map<String, Object>> registrationTrends = new ArrayList<>();
+        LocalDateTime now = LocalDateTime.now();
+        for (int i = 6; i >= 0; i--) {
+            LocalDateTime date = now.minusDays(i);
+            LocalDateTime startOfDay = date.withHour(0).withMinute(0).withSecond(0);
+            LocalDateTime endOfDay = date.withHour(23).withMinute(59).withSecond(59);
+            
+            long dailyRegistrations = userRepository.countByCreatedDateBetween(startOfDay, endOfDay);
+            
+            Map<String, Object> dayData = new HashMap<>();
+            dayData.put("date", date.format(DateTimeFormatter.ofPattern("MMM dd")));
+            dayData.put("registrations", dailyRegistrations);
+            registrationTrends.add(dayData);
+        }
+        analytics.put("registrationTrends", registrationTrends);
+        
+        // Top products (mock data - replace with actual product sales data)
+        List<Map<String, Object>> topProducts = Arrays.asList(
+            Map.of("name", "Norway 30GB eSIM", "sales", 234, "revenue", 23400.0),
+            Map.of("name", "Europe 50GB eSIM", "sales", 189, "revenue", 37800.0),
+            Map.of("name", "Nordic 20GB eSIM", "sales", 156, "revenue", 15600.0),
+            Map.of("name", "Global 10GB eSIM", "sales", 98, "revenue", 19600.0)
+        );
+        analytics.put("topProducts", topProducts);
+        
+        // Recent activities
+        List<User> recentUsers = userRepository.findTop10ByOrderByCreatedDateDesc();
+        List<Map<String, Object>> recentActivities = recentUsers.stream()
+            .map(user -> {
+                Map<String, Object> activity = new HashMap<>();
+                activity.put("id", user.getId());
+                activity.put("type", "USER_REGISTRATION");
+                activity.put("description", user.getFirstName() + " " + user.getLastName() + " registered");
+                activity.put("timestamp", user.getCreatedDate());
+                activity.put("accountType", user.getAccountType().name());
+                return activity;
+            })
+            .collect(Collectors.toList());
+        analytics.put("recentActivities", recentActivities);
+        
+        return analytics;
+    }
+
+    /**
+     * Get all users with pagination and filtering
+     */
+    public Map<String, Object> getAllUsers(int page, int size, String accountType, String accountStatus, String search) {
+        Pageable pageable = PageRequest.of(page, size, Sort.by("createdDate").descending());
+        Page<User> usersPage;
+        
+        if (search != null && !search.trim().isEmpty()) {
+            // Search by name or email
+            usersPage = userRepository.findByFirstNameContainingIgnoreCaseOrLastNameContainingIgnoreCaseOrEmailContainingIgnoreCase(
+                search, search, search, pageable);
+        } else if (accountType != null || accountStatus != null) {
+            // Filter by account type and/or status
+            User.AccountType type = accountType != null ? User.AccountType.valueOf(accountType.toUpperCase()) : null;
+            User.AccountStatus status = accountStatus != null ? User.AccountStatus.valueOf(accountStatus.toUpperCase()) : null;
+            
+            if (type != null && status != null) {
+                usersPage = userRepository.findByAccountTypeAndAccountStatus(type, status, pageable);
+            } else if (type != null) {
+                usersPage = userRepository.findByAccountType(type, pageable);
+            } else {
+                usersPage = userRepository.findByAccountStatus(status, pageable);
+            }
+        } else {
+            usersPage = userRepository.findAll(pageable);
+        }
+        
+        List<Map<String, Object>> users = usersPage.getContent().stream()
+            .map(this::convertUserToMap)
+            .collect(Collectors.toList());
+        
+        Map<String, Object> result = new HashMap<>();
+        result.put("users", users);
+        result.put("totalElements", usersPage.getTotalElements());
+        result.put("totalPages", usersPage.getTotalPages());
+        result.put("currentPage", page);
+        result.put("size", size);
+        
+        return result;
+    }
+
+    /**
+     * Get pending business registrations
+     */
+    public List<Map<String, Object>> getPendingBusinessRegistrations() {
+        List<User> pendingBusinessUsers = userRepository.findByAccountTypeAndAccountStatus(
+            User.AccountType.BUSINESS, User.AccountStatus.PENDING_BUSINESS_APPROVAL);
+        
+        return pendingBusinessUsers.stream()
+            .map(user -> {
+                Map<String, Object> registration = new HashMap<>();
+                registration.put("id", user.getId());
+                registration.put("user", convertUserToMap(user));
+                
+                if (user.getBusinessDetails() != null) {
+                    BusinessDetails business = user.getBusinessDetails();
+                    Map<String, Object> businessData = new HashMap<>();
+                    businessData.put("id", business.getId());
+                    businessData.put("companyName", business.getCompanyName());
+                    businessData.put("organizationNumber", business.getOrganizationNumber());
+                    businessData.put("vatNumber", business.getVatNumber());
+                    businessData.put("companyEmail", business.getCompanyEmail());
+                    businessData.put("verificationMethod", business.getVerificationMethod().name());
+                    businessData.put("verificationStatus", business.getVerificationStatus().name());
+                    businessData.put("createdDate", business.getCreatedDate());
+                    businessData.put("postalAddress", business.getPostalAddress());
+                    businessData.put("billingAddress", business.getBillingAddress());
+                    registration.put("businessDetails", businessData);
+                }
+                
+                return registration;
+            })
+            .collect(Collectors.toList());
+    }
+
+    /**
+     * Approve business user
+     */
+    public boolean approveBusinessUser(String userId) {
+        try {
+            Optional<User> userOpt = userRepository.findById(userId);
+            if (userOpt.isEmpty()) {
+                return false;
+            }
+            
+            User user = userOpt.get();
+            user.setAccountStatus(User.AccountStatus.ACTIVE);
+            user.setLastModifiedDate(LocalDateTime.now());
+            
+            // Update business details verification status
+            if (user.getBusinessDetails() != null) {
+                BusinessDetails business = user.getBusinessDetails();
+                business.setVerificationStatus(BusinessDetails.VerificationStatus.VERIFIED);
+                business.setLastModifiedDate(LocalDateTime.now());
+                businessDetailsRepository.save(business);
+            }
+            
+            userRepository.save(user);
+            
+            // Send approval email
+            emailService.sendBusinessApprovalEmail(user);
+            
+            return true;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    /**
+     * Reject business user
+     */
+    public boolean rejectBusinessUser(String userId, String reason) {
+        try {
+            Optional<User> userOpt = userRepository.findById(userId);
+            if (userOpt.isEmpty()) {
+                return false;
+            }
+            
+            User user = userOpt.get();
+            user.setAccountStatus(User.AccountStatus.SUSPENDED);
+            user.setLastModifiedDate(LocalDateTime.now());
+            
+            // Update business details verification status
+            if (user.getBusinessDetails() != null) {
+                BusinessDetails business = user.getBusinessDetails();
+                business.setVerificationStatus(BusinessDetails.VerificationStatus.REJECTED);
+                business.setAdminNotes(reason);
+                business.setLastModifiedDate(LocalDateTime.now());
+                businessDetailsRepository.save(business);
+            }
+            
+            userRepository.save(user);
+            
+            // Send rejection email
+            emailService.sendBusinessRejectionEmail(user, reason);
+            
+            return true;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    /**
+     * Update user status
+     */
+    public boolean updateUserStatus(String userId, String status) {
+        try {
+            Optional<User> userOpt = userRepository.findById(userId);
+            if (userOpt.isEmpty()) {
+                return false;
+            }
+            
+            User user = userOpt.get();
+            User.AccountStatus newStatus = User.AccountStatus.valueOf(status.toUpperCase());
+            user.setAccountStatus(newStatus);
+            user.setLastModifiedDate(LocalDateTime.now());
+            
+            userRepository.save(user);
+            return true;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    /**
+     * Get detailed user information
+     */
+    public Map<String, Object> getUserDetails(User user) {
+        Map<String, Object> details = convertUserToMap(user);
+        
+        // Add additional details
+        if (user.getBusinessDetails() != null) {
+            BusinessDetails business = user.getBusinessDetails();
+            Map<String, Object> businessData = new HashMap<>();
+            businessData.put("companyName", business.getCompanyName());
+            businessData.put("organizationNumber", business.getOrganizationNumber());
+            businessData.put("vatNumber", business.getVatNumber());
+            businessData.put("companyEmail", business.getCompanyEmail());
+            businessData.put("verificationMethod", business.getVerificationMethod().name());
+            businessData.put("verificationStatus", business.getVerificationStatus().name());
+            businessData.put("postalAddress", business.getPostalAddress());
+            businessData.put("billingAddress", business.getBillingAddress());
+            businessData.put("adminNotes", business.getAdminNotes());
+            details.put("businessDetails", businessData);
+        }
+        
+        // Add order history (mock data - replace with actual order data)
+        List<Map<String, Object>> orderHistory = new ArrayList<>();
+        details.put("orderHistory", orderHistory);
+        
+        return details;
+    }
+
+    /**
+     * Get enquiries/support tickets
+     */
+    public Map<String, Object> getEnquiries(int page, int size, String status, String priority) {
+        // This would use CustomerEnquiryRepository when implemented
+        // For now, returning mock data that matches the frontend structure
+        
+        List<Map<String, Object>> enquiries = Arrays.asList(
+            createEnquiryMap(
+                "ENQ001", "John Doe", "john@example.com", "Personal",
+                "eSIM Activation Issue", "Unable to activate my eSIM after purchase",
+                "Email", "Open", "High", "Sarah Johnson",
+                LocalDateTime.now().minusHours(2)
+            ),
+            createEnquiryMap(
+                "ENQ002", "Tech Solutions AS", "support@techsolutions.no", "Business",
+                "Bulk Order Support", "Need assistance with bulk eSIM order for 50 employees",
+                "WhatsApp", "In Progress", "Medium", "Mike Wilson",
+                LocalDateTime.now().minusHours(5)
+            )
+        );
+        
+        Map<String, Object> result = new HashMap<>();
+        result.put("enquiries", enquiries);
+        result.put("totalElements", enquiries.size());
+        result.put("totalPages", 1);
+        result.put("currentPage", page);
+        result.put("size", size);
+        
+        return result;
+    }
+
+    /**
+     * Update enquiry status
+     */
+    public boolean updateEnquiryStatus(String enquiryId, String status, String assignedAgent, String notes) {
+        // This would update the actual enquiry in the database
+        // For now, just return success
+        return true;
+    }
+
+    /**
+     * Get system statistics
+     */
+    public Map<String, Object> getSystemStatistics() {
+        Map<String, Object> stats = new HashMap<>();
+        
+        // User statistics
+        stats.put("totalUsers", userRepository.count());
+        stats.put("activeUsers", userRepository.countByAccountStatus(User.AccountStatus.ACTIVE));
+        stats.put("pendingUsers", userRepository.countByAccountStatus(User.AccountStatus.PENDING_VERIFICATION));
+        stats.put("businessUsers", userRepository.countByAccountType(User.AccountType.BUSINESS));
+        
+        // System health (mock data)
+        stats.put("systemHealth", "Healthy");
+        stats.put("uptime", "99.9%");
+        stats.put("apiResponseTime", "120ms");
+        
+        return stats;
+    }
+
+    /**
+     * Export users data
+     */
+    public byte[] exportUsersData(String format) {
+        // This would generate actual CSV/Excel export
+        // For now, return mock CSV data
+        String csvData = "ID,Name,Email,Account Type,Status,Created Date\n";
+        
+        List<User> users = userRepository.findAll();
+        for (User user : users) {
+            csvData += String.format("%s,%s %s,%s,%s,%s,%s\n",
+                user.getId(),
+                user.getFirstName(),
+                user.getLastName(),
+                user.getEmail(),
+                user.getAccountType().name(),
+                user.getAccountStatus().name(),
+                user.getCreatedDate().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+            );
+        }
+        
+        return csvData.getBytes();
+    }
+
+    /**
+     * Get revenue analytics
+     */
+    public Map<String, Object> getRevenueAnalytics(String period, String startDate, String endDate) {
+        Map<String, Object> analytics = new HashMap<>();
+        
+        // Real revenue data from actual transactions
+        double totalRevenue = calculateTotalRevenue();
+        double b2cRevenue = calculateB2CRevenue();
+        double b2bRevenue = calculateB2BRevenue();
+        double growthRate = calculateRevenueGrowth();
+        
+        analytics.put("totalRevenue", totalRevenue);
+        analytics.put("b2cRevenue", b2cRevenue);
+        analytics.put("b2bRevenue", b2bRevenue);
+        analytics.put("growthRate", growthRate);
+        
+        // Daily revenue for the last 30 days
+        List<Map<String, Object>> dailyRevenue = new ArrayList<>();
+        LocalDateTime now = LocalDateTime.now();
+        for (int i = 29; i >= 0; i--) {
+            LocalDateTime date = now.minusDays(i);
+            Map<String, Object> dayData = new HashMap<>();
+            dayData.put("date", date.format(DateTimeFormatter.ofPattern("MMM dd")));
+            dayData.put("revenue", Math.random() * 15000 + 5000); // Mock data
+            dailyRevenue.add(dayData);
+        }
+        analytics.put("dailyRevenue", dailyRevenue);
+        
+        return analytics;
+    }
+
+    /**
+     * Convert User entity to Map for API response
+     */
+    private Map<String, Object> convertUserToMap(User user) {
+        Map<String, Object> userMap = new HashMap<>();
+        userMap.put("id", user.getId());
+        userMap.put("firstName", user.getFirstName());
+        userMap.put("lastName", user.getLastName());
+        userMap.put("email", user.getEmail());
+        userMap.put("mobileNumber", user.getMobileNumber());
+        userMap.put("accountType", user.getAccountType().name());
+        userMap.put("accountStatus", user.getAccountStatus().name());
+        userMap.put("emailVerified", user.isEmailVerified());
+        userMap.put("createdDate", user.getCreatedDate());
+        userMap.put("lastModifiedDate", user.getLastModifiedDate());
+        return userMap;
+    }
+
+    private Map<String, Object> createEnquiryMap(String id, String customerName, String customerEmail, 
+                                                String accountType, String subject, String message,
+                                                String channel, String status, String priority, 
+                                                String assignedAgent, LocalDateTime createdDate) {
+        Map<String, Object> enquiry = new HashMap<>();
+        enquiry.put("id", id);
+        enquiry.put("customerName", customerName);
+        enquiry.put("customerEmail", customerEmail);
+        enquiry.put("accountType", accountType);
+        enquiry.put("subject", subject);
+        enquiry.put("message", message);
+        enquiry.put("channel", channel);
+        enquiry.put("status", status);
+        enquiry.put("priority", priority);
+        enquiry.put("assignedAgent", assignedAgent);
+        enquiry.put("createdDate", createdDate);
+        return enquiry;
+    }
+    
+    // Revenue calculation methods
+    private double calculateTotalRevenue() {
+        try {
+            // Calculate revenue from customer orders (Order entity)
+            List<Order> allOrders = orderRepository.findAll();
+            double customerRevenue = allOrders.stream()
+                .filter(order -> order.getStatus() == Order.OrderStatus.COMPLETED)
+                .mapToDouble(order -> order.getAmount() != null ? order.getAmount().doubleValue() : 0.0)
+                .sum();
+            
+            // Calculate revenue from retailer orders (RetailerOrder entity)
+            List<RetailerOrder> allRetailerOrders = retailerOrderRepository.findAll();
+            double retailerRevenue = allRetailerOrders.stream()
+                .filter(order -> order.getStatus() == RetailerOrder.OrderStatus.DELIVERED)
+                .mapToDouble(order -> order.getTotalAmount() != null ? order.getTotalAmount().doubleValue() : 0.0)
+                .sum();
+            
+            return customerRevenue + retailerRevenue;
+        } catch (Exception e) {
+            System.err.println("Error calculating total revenue: " + e.getMessage());
+            return 0.0;
+        }
+    }
+    
+    private double calculateMonthlyRevenue() {
+        try {
+            LocalDateTime startOfMonth = LocalDateTime.now().withDayOfMonth(1).withHour(0).withMinute(0).withSecond(0);
+            LocalDateTime endOfMonth = LocalDateTime.now();
+            
+            // Customer orders for this month
+            List<Order> monthlyOrders = orderRepository.findByCreatedDateBetween(startOfMonth, endOfMonth);
+            double customerRevenue = monthlyOrders.stream()
+                .filter(order -> order.getStatus() == Order.OrderStatus.COMPLETED)
+                .mapToDouble(order -> order.getAmount() != null ? order.getAmount().doubleValue() : 0.0)
+                .sum();
+            
+            // Retailer orders for this month
+            List<RetailerOrder> monthlyRetailerOrders = retailerOrderRepository.findByCreatedDateBetween(startOfMonth, endOfMonth);
+            double retailerRevenue = monthlyRetailerOrders.stream()
+                .filter(order -> order.getStatus() == RetailerOrder.OrderStatus.DELIVERED)
+                .mapToDouble(order -> order.getTotalAmount() != null ? order.getTotalAmount().doubleValue() : 0.0)
+                .sum();
+            
+            return customerRevenue + retailerRevenue;
+        } catch (Exception e) {
+            System.err.println("Error calculating monthly revenue: " + e.getMessage());
+            return 0.0;
+        }
+    }
+    
+    private double calculateDailyRevenue() {
+        try {
+            LocalDateTime startOfDay = LocalDateTime.now().withHour(0).withMinute(0).withSecond(0);
+            LocalDateTime endOfDay = LocalDateTime.now().withHour(23).withMinute(59).withSecond(59);
+            
+            // Customer orders for today
+            List<Order> todayOrders = orderRepository.findByCreatedDateBetween(startOfDay, endOfDay);
+            double customerRevenue = todayOrders.stream()
+                .filter(order -> order.getStatus() == Order.OrderStatus.COMPLETED)
+                .mapToDouble(order -> order.getAmount() != null ? order.getAmount().doubleValue() : 0.0)
+                .sum();
+            
+            // Retailer orders for today
+            List<RetailerOrder> todayRetailerOrders = retailerOrderRepository.findByCreatedDateBetween(startOfDay, endOfDay);
+            double retailerRevenue = todayRetailerOrders.stream()
+                .filter(order -> order.getStatus() == RetailerOrder.OrderStatus.DELIVERED)
+                .mapToDouble(order -> order.getTotalAmount() != null ? order.getTotalAmount().doubleValue() : 0.0)
+                .sum();
+            
+            return customerRevenue + retailerRevenue;
+        } catch (Exception e) {
+            System.err.println("Error calculating daily revenue: " + e.getMessage());
+            return 0.0;
+        }
+    }
+    
+    private double calculateRevenueGrowth() {
+        try {
+            // Calculate current month revenue
+            double currentMonthRevenue = calculateMonthlyRevenue();
+            
+            // Calculate previous month revenue
+            LocalDateTime startOfLastMonth = LocalDateTime.now().minusMonths(1).withDayOfMonth(1).withHour(0).withMinute(0).withSecond(0);
+            LocalDateTime endOfLastMonth = LocalDateTime.now().withDayOfMonth(1).minusDays(1).withHour(23).withMinute(59).withSecond(59);
+            
+            // Customer orders for last month
+            List<Order> lastMonthOrders = orderRepository.findByCreatedDateBetween(startOfLastMonth, endOfLastMonth);
+            double lastMonthCustomerRevenue = lastMonthOrders.stream()
+                .filter(order -> order.getStatus() == Order.OrderStatus.COMPLETED)
+                .mapToDouble(order -> order.getAmount() != null ? order.getAmount().doubleValue() : 0.0)
+                .sum();
+            
+            // Retailer orders for last month
+            List<RetailerOrder> lastMonthRetailerOrders = retailerOrderRepository.findByCreatedDateBetween(startOfLastMonth, endOfLastMonth);
+            double lastMonthRetailerRevenue = lastMonthRetailerOrders.stream()
+                .filter(order -> order.getStatus() == RetailerOrder.OrderStatus.DELIVERED)
+                .mapToDouble(order -> order.getTotalAmount() != null ? order.getTotalAmount().doubleValue() : 0.0)
+                .sum();
+            
+            double lastMonthRevenue = lastMonthCustomerRevenue + lastMonthRetailerRevenue;
+            
+            // Calculate growth percentage
+            if (lastMonthRevenue == 0) {
+                return currentMonthRevenue > 0 ? 100.0 : 0.0; // 100% growth if we had no revenue last month
+            }
+            
+            return ((currentMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100.0;
+        } catch (Exception e) {
+            System.err.println("Error calculating revenue growth: " + e.getMessage());
+            return 0.0;
+        }
+    }
+    
+    private double calculateB2CRevenue() {
+        try {
+            // B2C revenue comes from direct customer orders (Order entity)
+            List<Order> allOrders = orderRepository.findAll();
+            return allOrders.stream()
+                .filter(order -> order.getStatus() == Order.OrderStatus.COMPLETED)
+                .mapToDouble(order -> order.getAmount() != null ? order.getAmount().doubleValue() : 0.0)
+                .sum();
+        } catch (Exception e) {
+            System.err.println("Error calculating B2C revenue: " + e.getMessage());
+            return 0.0;
+        }
+    }
+    
+    private double calculateB2BRevenue() {
+        try {
+            // B2B revenue comes from retailer orders (RetailerOrder entity)
+            List<RetailerOrder> allRetailerOrders = retailerOrderRepository.findAll();
+            return allRetailerOrders.stream()
+                .filter(order -> order.getStatus() == RetailerOrder.OrderStatus.DELIVERED)
+                .mapToDouble(order -> order.getTotalAmount() != null ? order.getTotalAmount().doubleValue() : 0.0)
+                .sum();
+        } catch (Exception e) {
+            System.err.println("Error calculating B2B revenue: " + e.getMessage());
+            return 0.0;
+        }
+    }
+    
+    /**
+     * Get all retailers with their credit limit information
+     */
+    public List<RetailerCreditLimitDTO> getAllRetailersWithCreditLimits() {
+        try {
+            // Get all BUSINESS users
+            List<User> retailers = userRepository.findByAccountType(User.AccountType.BUSINESS);
+            
+            return retailers.stream()
+                .map(this::convertToRetailerCreditLimitDTO)
+                .sorted((a, b) -> {
+                    // Sort by credit usage percentage descending
+                    double usageA = a.getCreditUsagePercentage() != null ? a.getCreditUsagePercentage() : 0.0;
+                    double usageB = b.getCreditUsagePercentage() != null ? b.getCreditUsagePercentage() : 0.0;
+                    return Double.compare(usageB, usageA);
+                })
+                .collect(Collectors.toList());
+        } catch (Exception e) {
+            System.err.println("Error fetching retailers with credit limits: " + e.getMessage());
+            e.printStackTrace();
+            return new ArrayList<>();
+        }
+    }
+    
+    /**
+     * Get specific retailer's credit limit information
+     */
+    public RetailerCreditLimitDTO getRetailerCreditLimit(String retailerId) {
+        try {
+            User retailer = userRepository.findById(retailerId)
+                .orElseThrow(() -> new RuntimeException("Retailer not found"));
+                
+            if (retailer.getAccountType() != User.AccountType.BUSINESS) {
+                throw new RuntimeException("User is not a business/retailer account");
+            }
+            
+            return convertToRetailerCreditLimitDTO(retailer);
+        } catch (Exception e) {
+            System.err.println("Error fetching retailer credit limit: " + e.getMessage());
+            throw new RuntimeException("Failed to fetch retailer credit limit: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Update retailer credit limit
+     */
+    public RetailerCreditLimitDTO updateRetailerCreditLimit(UpdateCreditLimitRequest request) {
+        try {
+            User retailer = userRepository.findById(request.getRetailerId())
+                .orElseThrow(() -> new RuntimeException("Retailer not found"));
+                
+            if (retailer.getAccountType() != User.AccountType.BUSINESS) {
+                throw new RuntimeException("User is not a business/retailer account");
+            }
+            
+            // Get or create retailer limit
+            RetailerLimit limit = retailerLimitRepository.findByRetailer(retailer)
+                .orElse(new RetailerLimit());
+            
+            // If new limit, set retailer and initial values
+            if (limit.getId() == null) {
+                limit.setRetailer(retailer);
+                limit.setUsedCredit(BigDecimal.ZERO);
+                limit.setOutstandingAmount(BigDecimal.ZERO);
+                limit.setStatus(RetailerLimit.LimitStatus.ACTIVE);
+            }
+            
+            // Update credit limit
+            BigDecimal oldLimit = limit.getCreditLimit();
+            BigDecimal newLimit = request.getCreditLimit();
+            limit.setCreditLimit(newLimit);
+            
+            // Recalculate available credit
+            BigDecimal usedCredit = limit.getUsedCredit() != null ? limit.getUsedCredit() : BigDecimal.ZERO;
+            limit.setAvailableCredit(newLimit.subtract(usedCredit));
+            
+            // Update payment terms if provided
+            if (request.getPaymentTermsDays() != null) {
+                limit.setPaymentTermsDays(request.getPaymentTermsDays());
+            }
+            
+            // Save the updated limit
+            retailerLimitRepository.save(limit);
+            
+            System.out.println("✅ Updated credit limit for retailer " + retailer.getEmail() + 
+                             " from " + oldLimit + " to " + newLimit);
+            
+            return convertToRetailerCreditLimitDTO(retailer);
+        } catch (Exception e) {
+            System.err.println("Error updating retailer credit limit: " + e.getMessage());
+            e.printStackTrace();
+            throw new RuntimeException("Failed to update credit limit: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Convert User entity to RetailerCreditLimitDTO
+     */
+    private RetailerCreditLimitDTO convertToRetailerCreditLimitDTO(User retailer) {
+        RetailerCreditLimitDTO dto = new RetailerCreditLimitDTO();
+        
+        dto.setRetailerId(retailer.getId());
+        dto.setRetailerName(retailer.getFullName());
+        dto.setRetailerEmail(retailer.getEmail());
+        
+        // Get retailer limit if exists
+        Optional<RetailerLimit> limitOpt = retailerLimitRepository.findByRetailer(retailer);
+        
+        if (limitOpt.isPresent()) {
+            RetailerLimit limit = limitOpt.get();
+            dto.setId(limit.getId());
+            dto.setCreditLimit(limit.getCreditLimit());
+            dto.setAvailableCredit(limit.getAvailableCredit());
+            dto.setUsedCredit(limit.getUsedCredit());
+            dto.setOutstandingAmount(limit.getOutstandingAmount());
+            dto.setPaymentTermsDays(limit.getPaymentTermsDays());
+            dto.setLastPaymentDate(limit.getLastPaymentDate());
+            dto.setNextDueDate(limit.getNextDueDate());
+            dto.setStatus(limit.getStatus().toString());
+            
+            // Calculate credit usage percentage
+            if (limit.getCreditLimit() != null && limit.getCreditLimit().compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal usedCredit = limit.getUsedCredit() != null ? limit.getUsedCredit() : BigDecimal.ZERO;
+                double percentage = usedCredit.divide(limit.getCreditLimit(), 4, java.math.RoundingMode.HALF_UP)
+                                             .multiply(BigDecimal.valueOf(100))
+                                             .doubleValue();
+                dto.setCreditUsagePercentage(percentage);
+            } else {
+                dto.setCreditUsagePercentage(0.0);
+            }
+            
+            // Determine level based on credit limit
+            dto.setLevel(determineCreditLevel(limit.getCreditLimit()));
+        } else {
+            // No limit set yet
+            dto.setCreditLimit(BigDecimal.ZERO);
+            dto.setAvailableCredit(BigDecimal.ZERO);
+            dto.setUsedCredit(BigDecimal.ZERO);
+            dto.setOutstandingAmount(BigDecimal.ZERO);
+            dto.setPaymentTermsDays(30);
+            dto.setStatus("NOT_SET");
+            dto.setCreditUsagePercentage(0.0);
+            dto.setLevel("NOT_SET");
+        }
+        
+        return dto;
+    }
+    
+    /**
+     * Determine credit level based on credit limit
+     */
+    private String determineCreditLevel(BigDecimal creditLimit) {
+        if (creditLimit == null || creditLimit.compareTo(BigDecimal.ZERO) == 0) {
+            return "NOT_SET";
+        }
+        
+        double limit = creditLimit.doubleValue();
+        
+        if (limit >= 20000) {
+            return "DIAMOND";
+        } else if (limit >= 15000) {
+            return "PLATINUM";
+        } else if (limit >= 10000) {
+            return "GOLD";
+        } else if (limit >= 7500) {
+            return "SILVER";
+        } else if (limit >= 5000) {
+            return "BRONZE";
+        } else {
+            return "STARTER";
+        }
+    }
+}
