@@ -17,11 +17,16 @@ public interface StockPoolRepository extends MongoRepository<StockPool, String> 
     
     List<StockPool> findByStatus(StockPool.StockStatus status);
     
+    List<StockPool> findByStockTypeAndStatus(StockPool.StockType stockType, StockPool.StockStatus status);
+    
     Optional<StockPool> findByProductIdAndStockType(String productId, StockPool.StockType stockType);
     
     @Query("{ 'availableQuantity' : { $gt: 0 } }")
     List<StockPool> findAllWithAvailableStock();
     
-    @Query("{ 'availableQuantity' : { $lt: 10 } }")
+    @Query("{ 'status': 'ACTIVE', 'availableQuantity': { $lt: 10, $gt: 0 } }")
     List<StockPool> findLowStockPools();
+    
+    @Query("{ 'status': 'ACTIVE', 'availableQuantity': { $lt: ?0, $gt: 0 } }")
+    List<StockPool> findLowStockPoolsByThreshold(int threshold);
 }
