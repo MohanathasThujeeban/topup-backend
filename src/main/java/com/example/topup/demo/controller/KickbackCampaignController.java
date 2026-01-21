@@ -133,6 +133,67 @@ public class KickbackCampaignController {
     }
     
     /**
+     * Update an existing kickback campaign
+     * PUT /api/admin/kickback/campaigns/{id}
+     */
+    @PutMapping("/campaigns/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Map<String, Object>> updateCampaign(
+            @PathVariable Long id,
+            @RequestBody CreateKickbackCampaignRequest request,
+            @RequestAttribute(value = "userEmail", required = false) String adminEmail) {
+        
+        log.info("Updating kickback campaign {}: {}", id, request.getCampaignName());
+        
+        try {
+            if (adminEmail == null) {
+                adminEmail = "admin@easytopup.no";
+            }
+            
+            KickbackCampaign campaign = kickbackService.updateCampaign(id, request, adminEmail);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", "Campaign updated successfully");
+            response.put("campaign", campaign);
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error updating kickback campaign", e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("error", e.getMessage());
+            return ResponseEntity.badRequest().body(errorResponse);
+        }
+    }
+    
+    /**
+     * Delete a kickback campaign
+     * DELETE /api/admin/kickback/campaigns/{id}
+     */
+    @DeleteMapping("/campaigns/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Map<String, Object>> deleteCampaign(@PathVariable Long id) {
+        log.info("Deleting kickback campaign: {}", id);
+        
+        try {
+            kickbackService.deleteCampaign(id);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", "Campaign deleted successfully");
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error deleting kickback campaign", e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("error", e.getMessage());
+            return ResponseEntity.badRequest().body(errorResponse);
+        }
+    }
+    
+    /**
      * Get all pending earnings for approval
      * GET /api/admin/kickback/earnings/pending
      */

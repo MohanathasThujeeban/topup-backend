@@ -752,6 +752,7 @@ public class StockController {
             Object poolIdObj = requestData.get("poolId");
             Object priceObj = requestData.get("price");
             Object paymentModeObj = requestData.get("paymentMode");
+            Object skipEmailObj = requestData.get("skipEmail");
             
             // Convert to strings with null safety
             String itemId = (itemIdObj != null ? itemIdObj.toString().trim() : "").replaceAll("[;'\"]", "");
@@ -762,6 +763,7 @@ public class StockController {
             String poolId = (poolIdObj != null ? poolIdObj.toString().trim() : "").replaceAll("[;'\"]", "");
             String priceStr = (priceObj != null ? priceObj.toString().trim() : "0").replaceAll("[;'\"]", "");
             String paymentMode = (paymentModeObj != null ? paymentModeObj.toString().trim() : "credit").replaceAll("[;'\"]", ""); // Default to 'credit'
+            boolean skipEmail = (skipEmailObj != null && Boolean.parseBoolean(skipEmailObj.toString())); // Check if email should be skipped
             
             System.out.println("   itemId: [" + itemId + "]");
             System.out.println("   iccid: [" + iccid + "]");
@@ -771,6 +773,7 @@ public class StockController {
             System.out.println("   poolId: [" + poolId + "]");
             System.out.println("   price: [" + priceStr + "]");
             System.out.println("   paymentMode: [" + paymentMode + "]");
+            System.out.println("   skipEmail: [" + skipEmail + "]");
             
             // Validate required fields
             if (itemId.isEmpty()) {
@@ -779,11 +782,14 @@ public class StockController {
             if (iccid.isEmpty()) {
                 throw new IllegalArgumentException("iccid is required but was empty or missing");
             }
-            if (customerEmail.isEmpty()) {
-                throw new IllegalArgumentException("customerEmail is required but was empty or missing");
-            }
-            if (customerName.isEmpty()) {
-                throw new IllegalArgumentException("customerName is required but was empty or missing");
+            // Only validate email fields if we're NOT skipping email
+            if (!skipEmail) {
+                if (customerEmail.isEmpty()) {
+                    throw new IllegalArgumentException("customerEmail is required but was empty or missing");
+                }
+                if (customerName.isEmpty()) {
+                    throw new IllegalArgumentException("customerName is required but was empty or missing");
+                }
             }
             if (poolId.isEmpty()) {
                 throw new IllegalArgumentException("poolId is required but was empty or missing");
@@ -953,38 +959,47 @@ public class StockController {
             // Generate order ID
             String orderId = "eSIM-" + System.currentTimeMillis();
             
-            // Send email using proper eSIM approval method with QR code embedding
-            System.out.println("📤 Sending professional eSIM activation email to: " + customerEmail);
-            System.out.println("   - Product: " + pool.getName());
-            System.out.println("   - ICCID: " + iccid);
-            System.out.println("   - Price: " + priceStr + " NOK");
-            System.out.println("   - Has QR Code: " + (qrCodeBase64 != null && !qrCodeBase64.isEmpty()));
-            System.out.println("   - QR Code Length: " + (qrCodeBase64 != null ? qrCodeBase64.length() : 0));
-            if (qrCodeBase64 != null && qrCodeBase64.length() > 0) {
-                System.out.println("   - QR Code Starts With: " + qrCodeBase64.substring(0, Math.min(50, qrCodeBase64.length())));
-                System.out.println("   - Is Valid PNG: " + qrCodeBase64.startsWith("iVBORw0KGgo"));
+            // Send email only if skipEmail is false
+            if (!skipEmail) {
+                System.out.println("📤 Sending professional eSIM activation email to: " + customerEmail);
+                System.out.println("   - Product: " + pool.getName());
+                System.out.println("   - ICCID: " + iccid);
+                System.out.println("   - Price: " + priceStr + " NOK");
+                System.out.println("   - Has QR Code: " + (qrCodeBase64 != null && !qrCodeBase64.isEmpty()));
+                System.out.println("   - QR Code Length: " + (qrCodeBase64 != null ? qrCodeBase64.length() : 0));
+                if (qrCodeBase64 != null && qrCodeBase64.length() > 0) {
+                    System.out.println("   - QR Code Starts With: " + qrCodeBase64.substring(0, Math.min(50, qrCodeBase64.length())));
+                    System.out.println("   - Is Valid PNG: " + qrCodeBase64.startsWith("iVBORw0KGgo"));
+                } else {
+                    System.out.println("   - ❌ QR CODE IS NULL OR EMPTY - EMAIL WILL NOT HAVE QR CODE!");
+                }
+                System.out.println("   - Has Activation Code: " + (decryptedActivationCode != null && !decryptedActivationCode.isEmpty()));
+                emailService.sendEsimApprovalEmail(
+                    customerEmail,
+                    customerName,
+                    orderId,
+                    iccid,
+                    qrCodeBase64,
+                    decryptedActivationCode,
+                    smDpAddress,
+                    priceStr + " NOK"
+                );
+                System.out.println("✅ Professional email sent successfully with embedded QR code and price");
             } else {
-                System.out.println("   - ❌ QR CODE IS NULL OR EMPTY - EMAIL WILL NOT HAVE QR CODE!");
+                System.out.println("⏭️ Skipping email send (skipEmail=true) - POS Print mode");
             }
-            System.out.println("   - Has Activation Code: " + (decryptedActivationCode != null && !decryptedActivationCode.isEmpty()));
-            emailService.sendEsimApprovalEmail(
-                customerEmail,
-                customerName,
-                orderId,
-                iccid,
-                qrCodeBase64,
-                decryptedActivationCode,
-                smDpAddress,
-                priceStr + " NOK"
-            );
-            System.out.println("✅ Professional email sent successfully with embedded QR code and price");
             
             // Mark item as USED and remove from pool
             System.out.println("📦 Updating stock pool - marking item as USED and removing from inventory");
             esimItem.setStatus(StockPool.StockItem.ItemStatus.USED);
-            esimItem.setAssignedToUserEmail(customerEmail);
+            
+            // Set assignment info - use placeholder for print orders
+            String assignedEmail = skipEmail ? "print@easytopup.no" : customerEmail;
+            String customerInfo = skipEmail ? "POS Print Order" : customerName + " (" + customerEmail + ")";
+            
+            esimItem.setAssignedToUserEmail(assignedEmail);
             esimItem.setUsedDate(java.time.LocalDateTime.now());
-            esimItem.setNotes("Sold to: " + customerName + " (" + customerEmail + ")");
+            esimItem.setNotes("Sold to: " + customerInfo);
             
             // Remove from available inventory
             pool.getItems().remove(esimItem);
@@ -1042,8 +1057,9 @@ public class StockController {
                         order.setRetailerId(retailer.getId());
                         order.setOrderNumber("eSIM-" + System.currentTimeMillis());
                         
-                        // Add customer details in notes field
-                        order.setNotes("Customer: " + customerName + " (" + customerEmail + ")");
+                        // Add customer details in notes field - use placeholder for print orders
+                        String orderNotes = skipEmail ? "POS Print Order" : "Customer: " + customerName + " (" + customerEmail + ")";
+                        order.setNotes(orderNotes);
                         
                         // Create OrderItem for the eSIM
                         RetailerOrder.OrderItem item = new RetailerOrder.OrderItem();
@@ -1080,8 +1096,8 @@ public class StockController {
                         // Create EsimOrderRequest to store customer details for sales report
                         EsimOrderRequest esimOrderRequest = new EsimOrderRequest();
                         esimOrderRequest.setOrderNumber(order.getOrderNumber());
-                        esimOrderRequest.setCustomerFullName(customerName);
-                        esimOrderRequest.setCustomerEmail(customerEmail);
+                        esimOrderRequest.setCustomerFullName(skipEmail ? "POS Print Order" : customerName);
+                        esimOrderRequest.setCustomerEmail(skipEmail ? "print@easytopup.no" : customerEmail);
                         esimOrderRequest.setProductName(pool.getName());
                         esimOrderRequest.setProductId(poolId);
                         esimOrderRequest.setAmount((double) price);
@@ -1097,8 +1113,8 @@ public class StockController {
                         // ========== SAVE TO NEW esim_pos_sales COLLECTION ==========
                         EsimPosSale savedPosSale = null;
                         try {
-                            EsimPosSale posSale = new EsimPosSale(retailer, customerEmail);
-                            posSale.setCustomerName(customerName);
+                            EsimPosSale posSale = new EsimPosSale(retailer, skipEmail ? "print@easytopup.no" : customerEmail);
+                            posSale.setCustomerName(skipEmail ? "POS Print Order" : customerName);
                             posSale.setIccid(iccid);
                             posSale.setProductName(pool.getName());
                             posSale.setProductId(poolId);
@@ -1108,7 +1124,7 @@ public class StockController {
                             posSale.setOrderId(order.getId());
                             posSale.setOrderReference(order.getOrderNumber());
                             posSale.setStatus(EsimPosSale.SaleStatus.COMPLETED);
-                            posSale.setEmailSent(true);
+                            posSale.setEmailSent(!skipEmail); // Only mark as sent if email was actually sent
                             posSale.setCreatedBy(retailerEmail);
                             
                             // Set cost price if available

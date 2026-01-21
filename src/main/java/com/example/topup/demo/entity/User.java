@@ -16,6 +16,8 @@ import org.springframework.security.core.userdetails.UserDetails;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 
 @Document(collection = "users")
 public class User implements UserDetails {
@@ -57,6 +59,9 @@ public class User implements UserDetails {
 
     @DBRef
     private BusinessDetails businessDetails;
+
+    // Flexible key-value storage for additional user data
+    private Map<String, Object> metadata;
 
     @CreatedDate
     private LocalDateTime createdDate;
@@ -235,6 +240,14 @@ public class User implements UserDetails {
 
     public void setLastModifiedDate(LocalDateTime lastModifiedDate) {
         this.lastModifiedDate = lastModifiedDate;
+    }
+
+    public Map<String, Object> getMetadata() {
+        return metadata;
+    }
+
+    public void setMetadata(Map<String, Object> metadata) {
+        this.metadata = metadata;
     }
 
     // Alias methods for compatibility

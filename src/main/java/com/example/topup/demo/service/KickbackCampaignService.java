@@ -27,7 +27,6 @@ public class KickbackCampaignService {
     private final KickbackCampaignRepository campaignRepository;
     private final KickbackEarningRepository earningRepository;
     private final RetailerKickbackParticipationRepository participationRepository;
-    private final RetailerOrderRepository retailerOrderRepository;
     
     /**
      * Create a new kickback campaign
@@ -85,6 +84,66 @@ public class KickbackCampaignService {
         KickbackCampaign campaign = campaignRepository.findById(campaignId)
             .orElseThrow(() -> new RuntimeException("Campaign not found"));
         return convertToCampaignDTO(campaign);
+    }
+    
+    /**
+     * Update an existing campaign
+     */
+    @Transactional
+    public KickbackCampaign updateCampaign(Long campaignId, CreateKickbackCampaignRequest request, String adminEmail) {
+        log.info("Updating campaign {} by admin: {}", campaignId, adminEmail);
+        
+        KickbackCampaign campaign = campaignRepository.findById(campaignId)
+            .orElseThrow(() -> new RuntimeException("Campaign not found"));
+        
+        // Update campaign fields
+        campaign.setCampaignName(request.getCampaignName());
+        campaign.setProductId(request.getProductId());
+        campaign.setProductName(request.getProductName());
+        campaign.setProductPrice(request.getProductPrice());
+        campaign.setKickbackRate(request.getKickbackRate());
+        campaign.setSalesTarget(request.getSalesTarget());
+        campaign.setDurationDays(request.getDurationDays());
+        campaign.setStartDate(request.getStartDate());
+        campaign.setEndDate(request.getStartDate().plusDays(request.getDurationDays()));
+        campaign.setDescription(request.getDescription());
+        
+        // Update selected retailers
+        if (request.getSelectedRetailers() != null && !request.getSelectedRetailers().isEmpty()) {
+            campaign.setRetailerIds(String.join(",", request.getSelectedRetailers()));
+        } else {
+            campaign.setRetailerIds(null);
+        }
+        
+        return campaignRepository.save(campaign);
+    }
+    
+    /**
+     * Delete a campaign
+     */
+    @Transactional
+    public void deleteCampaign(Long campaignId) {
+        log.info("Deleting campaign: {}", campaignId);
+        
+        KickbackCampaign campaign = campaignRepository.findById(campaignId)
+            .orElseThrow(() -> new RuntimeException("Campaign not found"));
+        
+        // Delete associated participations and earnings
+        List<RetailerKickbackParticipation> participations = participationRepository.findByCampaignIdOrderByTotalSalesDesc(campaignId);
+        participationRepository.deleteAll(participations);
+        
+        // Delete associated earnings for all statuses
+        List<KickbackEarning> earnings = earningRepository.findByCampaignIdAndStatus(campaignId, KickbackEarning.EarningStatus.PENDING);
+        earningRepository.deleteAll(earnings);
+        earnings = earningRepository.findByCampaignIdAndStatus(campaignId, KickbackEarning.EarningStatus.APPROVED);
+        earningRepository.deleteAll(earnings);
+        earnings = earningRepository.findByCampaignIdAndStatus(campaignId, KickbackEarning.EarningStatus.REJECTED);
+        earningRepository.deleteAll(earnings);
+        
+        // Delete the campaign
+        campaignRepository.delete(campaign);
+        
+        log.info("Campaign {} deleted successfully", campaignId);
     }
     
     /**
@@ -418,10 +477,16 @@ public class KickbackCampaignService {
             .stream()
             .filter(campaign -> {
                 // Check if product matches (flexible matching)
-                String campaignProductId = campaign.getProductId().toLowerCase();
+                String campaignProductId = campaign.getProductId() != null
+                    ? campaign.getProductId().toLowerCase()
+                    : "";
                 String saleProductId = productId.toLowerCase();
                 
-                boolean productMatches = campaignProductId.equals(saleProductId) || 
+                // Special case: campaign applies to all products
+                boolean isAllProducts = "all_products".equals(campaignProductId);
+                
+                boolean productMatches = isAllProducts || 
+                                       campaignProductId.equals(saleProductId) || 
                                        saleProductId.contains(campaignProductId) ||
                                        campaignProductId.contains(saleProductId);
                 

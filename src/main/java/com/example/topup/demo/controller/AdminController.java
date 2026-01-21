@@ -1,6 +1,8 @@
 package com.example.topup.demo.controller;
 
 import com.example.topup.demo.service.AdminService;
+import com.example.topup.demo.entity.User;
+import com.example.topup.demo.repository.UserRepository;
 import com.example.topup.demo.dto.RetailerCreditLimitDTO;
 import com.example.topup.demo.dto.UpdateCreditLimitRequest;
 import com.example.topup.demo.dto.UpdateUnitLimitRequest;
@@ -17,6 +19,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/admin")
@@ -27,6 +30,9 @@ public class AdminController {
 
     @Autowired
     private AdminService adminService;
+
+    @Autowired
+    private UserRepository userRepository;
 
     /**
      * Test endpoint to verify admin controller is working
@@ -842,6 +848,91 @@ public class AdminController {
             error.put("success", false);
             error.put("error", e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+        }
+    }
+
+    /**
+     * Get visible products for a retailer
+     * GET /api/admin/retailers/{email}/visible-products
+     */
+    @GetMapping("/retailers/{email}/visible-products")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<?> getVisibleProducts(@PathVariable String email) {
+        try {
+            Optional<User> retailerOpt = userRepository.findByEmail(email);
+            if (!retailerOpt.isPresent()) {
+                Map<String, Object> response = new HashMap<>();
+                response.put("success", false);
+                response.put("error", "Retailer not found");
+                return ResponseEntity.badRequest().body(response);
+            }
+
+            User retailer = retailerOpt.get();
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            
+            // Get visible product IDs from retailer metadata or return empty list (all visible by default)
+            List<String> visibleProductIds = new ArrayList<>();
+            if (retailer.getMetadata() != null && retailer.getMetadata().containsKey("visibleProductIds")) {
+                String visibleIds = (String) retailer.getMetadata().get("visibleProductIds");
+                if (visibleIds != null && !visibleIds.isEmpty()) {
+                    visibleProductIds = Arrays.asList(visibleIds.split(","));
+                }
+            }
+            
+            response.put("visibleProductIds", visibleProductIds);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", false);
+            response.put("error", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    /**
+     * Save visible products for a retailer
+     * POST /api/admin/retailers/{email}/visible-products
+     */
+    @PostMapping("/retailers/{email}/visible-products")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<?> setVisibleProducts(@PathVariable String email, @RequestBody Map<String, Object> request) {
+        try {
+            Optional<User> retailerOpt = userRepository.findByEmail(email);
+            if (!retailerOpt.isPresent()) {
+                Map<String, Object> response = new HashMap<>();
+                response.put("success", false);
+                response.put("error", "Retailer not found");
+                return ResponseEntity.badRequest().body(response);
+            }
+
+            User retailer = retailerOpt.get();
+
+            // Get visible product IDs from request
+            List<?> visibleProductIds = (List<?>) request.get("visibleProductIds");
+            String visibleIdsStr = "";
+            if (visibleProductIds != null && !visibleProductIds.isEmpty()) {
+                visibleIdsStr = String.join(",", visibleProductIds.stream().map(Object::toString).collect(Collectors.toList()));
+            }
+
+            // Initialize metadata if needed
+            if (retailer.getMetadata() == null) {
+                retailer.setMetadata(new HashMap<>());
+            }
+
+            // Save visible product IDs
+            retailer.getMetadata().put("visibleProductIds", visibleIdsStr);
+            userRepository.save(retailer);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", "Product visibility updated successfully");
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", false);
+            response.put("error", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
         }
     }
 }
