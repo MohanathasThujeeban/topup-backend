@@ -5,7 +5,6 @@ import com.example.topup.demo.entity.BusinessDetails;
 import com.example.topup.demo.entity.Order;
 import com.example.topup.demo.entity.RetailerOrder;
 import com.example.topup.demo.entity.RetailerLimit;
-import com.example.topup.demo.entity.RetailerEsimCredit;
 import com.example.topup.demo.entity.EsimOrderRequest;
 import com.example.topup.demo.entity.StockPool;
 import com.example.topup.demo.entity.RetailerKickbackLimit;
@@ -19,7 +18,6 @@ import com.example.topup.demo.repository.BusinessDetailsRepository;
 import com.example.topup.demo.repository.OrderRepository;
 import com.example.topup.demo.repository.RetailerOrderRepository;
 import com.example.topup.demo.repository.RetailerLimitRepository;
-import com.example.topup.demo.repository.RetailerEsimCreditRepository;
 import com.example.topup.demo.repository.EsimOrderRequestRepository;
 import com.example.topup.demo.repository.StockPoolRepository;
 import com.example.topup.demo.repository.RetailerKickbackLimitRepository;
@@ -52,9 +50,6 @@ public class AdminService {
 
     @Autowired
     private RetailerLimitRepository retailerLimitRepository;
-
-    @Autowired
-    private RetailerEsimCreditRepository retailerEsimCreditRepository;
 
     @Autowired
     private EsimOrderRequestRepository esimOrderRequestRepository;
@@ -690,6 +685,37 @@ public class AdminService {
     }
     
     /**
+     * Get all retailers for kickback campaigns and other features
+     */
+    public List<Map<String, Object>> getAllRetailers() {
+        try {
+            List<User> retailers = userRepository.findByAccountType(User.AccountType.BUSINESS);
+            
+            return retailers.stream()
+                .map(retailer -> {
+                    Map<String, Object> retailerData = new HashMap<>();
+                    retailerData.put("id", retailer.getId());
+                    retailerData.put("email", retailer.getEmail());
+                    // Get business name from BusinessDetails if available
+                    String businessName = "";
+                    if (retailer.getBusinessDetails() != null) {
+                        businessName = retailer.getBusinessDetails().getCompanyName();
+                    }
+                    retailerData.put("businessName", businessName);
+                    retailerData.put("phoneNumber", retailer.getMobileNumber());
+                    retailerData.put("accountType", retailer.getAccountType().toString());
+                    retailerData.put("isActive", retailer.isEmailVerified());
+                    return retailerData;
+                })
+                .collect(Collectors.toList());
+        } catch (Exception e) {
+            System.err.println("Error fetching retailers: " + e.getMessage());
+            e.printStackTrace();
+            return new ArrayList<>();
+        }
+    }
+    
+    /**
      * Get all retailers with their credit limit information
      */
     public List<RetailerCreditLimitDTO> getAllRetailersWithCreditLimits() {
@@ -857,56 +883,6 @@ public class AdminService {
     }
     
     /**
-     * Update retailer eSIM credit limit specifically
-     * This data is stored in a SEPARATE collection: retailer_esim_credits
-     */
-    public RetailerCreditLimitDTO updateRetailerEsimCreditLimit(com.example.topup.demo.dto.UpdateEsimCreditLimitRequest request) {
-        try {
-            User retailer = userRepository.findById(request.getRetailerId())
-                .orElseThrow(() -> new RuntimeException("Retailer not found"));
-                
-            if (retailer.getAccountType() != User.AccountType.BUSINESS) {
-                throw new RuntimeException("User is not a business/retailer account");
-            }
-            
-            // Get or create eSIM credit record from SEPARATE collection
-            RetailerEsimCredit esimCredit = retailerEsimCreditRepository.findByRetailer(retailer)
-                .orElse(new RetailerEsimCredit(retailer));
-            
-            // Track old limit for logging
-            BigDecimal oldEsimLimit = esimCredit.getCreditLimit() != null ? esimCredit.getCreditLimit() : BigDecimal.ZERO;
-            BigDecimal newEsimLimit = request.getEsimCreditLimit();
-            
-            // Update eSIM credit limit using the entity method
-            esimCredit.adjustCreditLimit(newEsimLimit, "admin", 
-                request.getNotes() != null ? request.getNotes() : "Admin updated eSIM credit limit");
-            
-            // Set notes if provided
-            if (request.getNotes() != null) {
-                esimCredit.setNotes(request.getNotes());
-            }
-            
-            // Set audit fields
-            esimCredit.setLastModifiedBy("admin");
-            
-            // Save to the SEPARATE retailer_esim_credits collection
-            retailerEsimCreditRepository.save(esimCredit);
-            
-            System.out.println("✅ Updated eSIM credit limit in retailer_esim_credits collection for retailer " + retailer.getEmail() + 
-                             " from " + oldEsimLimit + " to " + newEsimLimit);
-            System.out.println("📊 eSIM Credit ID: " + esimCredit.getId());
-            System.out.println("📊 Available Credit: " + esimCredit.getAvailableCredit());
-            System.out.println("📊 Used Credit: " + esimCredit.getUsedCredit());
-            
-            return convertToRetailerCreditLimitDTO(retailer);
-        } catch (Exception e) {
-            System.err.println("Error updating retailer eSIM credit limit: " + e.getMessage());
-            e.printStackTrace();
-            throw new RuntimeException("Failed to update eSIM credit limit: " + e.getMessage());
-        }
-    }
-    
-    /**
      * Convert User entity to RetailerCreditLimitDTO
      */
     private RetailerCreditLimitDTO convertToRetailerCreditLimitDTO(User retailer) {
@@ -918,9 +894,6 @@ public class AdminService {
         
         // Get retailer limit if exists
         Optional<RetailerLimit> limitOpt = retailerLimitRepository.findByRetailer(retailer);
-        
-        // Get eSIM credit from SEPARATE collection
-        Optional<RetailerEsimCredit> esimCreditOpt = retailerEsimCreditRepository.findByRetailer(retailer);
         
         if (limitOpt.isPresent()) {
             RetailerLimit limit = limitOpt.get();
@@ -969,31 +942,6 @@ public class AdminService {
             dto.setUsedUnits(0);
             dto.setAvailableUnits(0);
             dto.setUnitUsagePercentage(0.0);
-        }
-        
-        // Set eSIM credit limit fields from SEPARATE collection
-        if (esimCreditOpt.isPresent()) {
-            RetailerEsimCredit esimCredit = esimCreditOpt.get();
-            dto.setEsimCreditLimit(esimCredit.getCreditLimit() != null ? esimCredit.getCreditLimit() : BigDecimal.ZERO);
-            dto.setEsimAvailableCredit(esimCredit.getAvailableCredit() != null ? esimCredit.getAvailableCredit() : BigDecimal.ZERO);
-            dto.setEsimUsedCredit(esimCredit.getUsedCredit() != null ? esimCredit.getUsedCredit() : BigDecimal.ZERO);
-            
-            // Calculate eSIM credit usage percentage
-            if (esimCredit.getCreditLimit() != null && esimCredit.getCreditLimit().compareTo(BigDecimal.ZERO) > 0) {
-                BigDecimal esimUsed = esimCredit.getUsedCredit() != null ? esimCredit.getUsedCredit() : BigDecimal.ZERO;
-                double esimPercentage = esimUsed.divide(esimCredit.getCreditLimit(), 4, java.math.RoundingMode.HALF_UP)
-                                             .multiply(BigDecimal.valueOf(100))
-                                             .doubleValue();
-                dto.setEsimCreditUsagePercentage(esimPercentage);
-            } else {
-                dto.setEsimCreditUsagePercentage(0.0);
-            }
-        } else {
-            // Default eSIM credit limit values
-            dto.setEsimCreditLimit(BigDecimal.ZERO);
-            dto.setEsimAvailableCredit(BigDecimal.ZERO);
-            dto.setEsimUsedCredit(BigDecimal.ZERO);
-            dto.setEsimCreditUsagePercentage(0.0);
         }
         
         return dto;

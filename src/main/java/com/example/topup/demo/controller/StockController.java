@@ -4,7 +4,6 @@ import com.example.topup.demo.entity.StockPool;
 import com.example.topup.demo.entity.User;
 import com.example.topup.demo.entity.RetailerOrder;
 import com.example.topup.demo.entity.RetailerLimit;
-import com.example.topup.demo.entity.RetailerEsimCredit;
 import com.example.topup.demo.entity.EsimOrderRequest;
 import com.example.topup.demo.entity.EsimPosSale;
 import com.example.topup.demo.service.StockService;
@@ -14,9 +13,10 @@ import com.example.topup.demo.repository.StockPoolRepository;
 import com.example.topup.demo.repository.UserRepository;
 import com.example.topup.demo.repository.RetailerOrderRepository;
 import com.example.topup.demo.repository.RetailerLimitRepository;
-import com.example.topup.demo.repository.RetailerEsimCreditRepository;
 import com.example.topup.demo.repository.EsimOrderRequestRepository;
 import com.example.topup.demo.repository.EsimPosSaleRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
@@ -41,6 +41,8 @@ import java.util.Map;
 @CrossOrigin(origins = {"http://localhost:5173", "http://localhost:8080", "https://topup-website-gmoj.vercel.app"})
 public class StockController {
 
+    private static final Logger log = LoggerFactory.getLogger(StockController.class);
+
     @Autowired
     private StockService stockService;
 
@@ -58,9 +60,6 @@ public class StockController {
 
     @Autowired
     private RetailerLimitRepository retailerLimitRepository;
-
-    @Autowired
-    private RetailerEsimCreditRepository retailerEsimCreditRepository;
 
     @Autowired
     private EsimOrderRequestRepository esimOrderRequestRepository;
@@ -146,7 +145,9 @@ public class StockController {
             
             return ResponseEntity.ok(maskedPools);
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+            log.error("Error fetching stock pools: ", e);
+            // Return empty list instead of error to prevent frontend crash
+            return ResponseEntity.ok(new ArrayList<>());
         }
     }
 
@@ -158,9 +159,9 @@ public class StockController {
             List<Map<String, Object>> bundles = stockService.getAllStockPoolsForBundleManagement();
             return ResponseEntity.ok(bundles);
         } catch (Exception e) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("error", "Failed to retrieve stock bundles: " + e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(List.of(error));
+            log.error("Error fetching stock bundles: ", e);
+            // Return empty list instead of error
+            return ResponseEntity.ok(new ArrayList<>());
         }
     }
 
@@ -679,7 +680,7 @@ public class StockController {
                             }
                         }
                         
-                        // Include PIN/PUK if available (already encrypted)
+                        // Include PIN/PUK if available (already encryptrd)
                         if (item.getPin1() != null) {
                             itemData.put("pin1", stockService.decryptData(item.getPin1()));
                         }
@@ -1183,80 +1184,38 @@ public class StockController {
                                         System.err.println("⚠️ No Kickback Limit record found for retailer: " + retailer.getId());
                                     }
                                 } else {
-                                    // ========== DEDUCT FROM eSIM CREDIT (DEFAULT) ==========
-                                    System.out.println("💳 Deducting from eSIM CREDIT");
-                                    var esimCreditOpt = retailerEsimCreditRepository.findByRetailer_Id(retailer.getId());
-                                    System.out.println("📊 RetailerEsimCredit (new collection) found: " + esimCreditOpt.isPresent());
-                                
-                                    RetailerEsimCredit esimCredit = null;
+                                    // ========== DEDUCT FROM UNIFIED CREDIT (DEFAULT) ==========
+                                    System.out.println("💳 Deducting from UNIFIED CREDIT");
+                                    var limitOpt = retailerLimitRepository.findByRetailer_Id(retailer.getId());
                                     
-                                    if (esimCreditOpt.isPresent()) {
-                                        esimCredit = esimCreditOpt.get();
-                                    } else {
-                                        // Fallback: Check OLD retailer_limits collection and migrate if exists
-                                        System.out.println("📊 Checking OLD retailer_limits collection for eSIM credit...");
-                                        var oldLimitOpt = retailerLimitRepository.findByRetailer_Id(retailer.getId());
+                                    if (limitOpt.isPresent()) {
+                                        RetailerLimit limit = limitOpt.get();
+                                        System.out.println("📊 BEFORE - Credit Limit: " + limit.getCreditLimit());
+                                        System.out.println("📊 BEFORE - Available Credit: " + limit.getAvailableCredit());
+                                        System.out.println("📊 BEFORE - Used Credit: " + limit.getUsedCredit());
                                         
-                                        if (oldLimitOpt.isPresent()) {
-                                            RetailerLimit oldLimit = oldLimitOpt.get();
-                                            BigDecimal oldEsimCreditLimit = oldLimit.getEsimCreditLimit();
-                                            BigDecimal oldEsimUsedCredit = oldLimit.getEsimUsedCredit();
-                                            BigDecimal oldEsimAvailableCredit = oldLimit.getEsimAvailableCredit();
-                                            
-                                            if (oldEsimCreditLimit != null && oldEsimCreditLimit.compareTo(BigDecimal.ZERO) > 0) {
-                                                System.out.println("📊 Found eSIM credit in OLD collection - MIGRATING...");
-                                                System.out.println("   Old eSIM Credit Limit: " + oldEsimCreditLimit);
-                                                System.out.println("   Old eSIM Used Credit: " + oldEsimUsedCredit);
-                                                System.out.println("   Old eSIM Available Credit: " + oldEsimAvailableCredit);
-                                                
-                                                // Create new record in retailer_esim_credits collection
-                                                esimCredit = new RetailerEsimCredit(retailer);
-                                                esimCredit.setCreditLimit(oldEsimCreditLimit);
-                                                esimCredit.setUsedCredit(oldEsimUsedCredit != null ? oldEsimUsedCredit : BigDecimal.ZERO);
-                                                esimCredit.setAvailableCredit(oldEsimAvailableCredit != null ? oldEsimAvailableCredit : oldEsimCreditLimit);
-                                                esimCredit.setCreatedBy("system-migration");
-                                                esimCredit = retailerEsimCreditRepository.save(esimCredit);
-                                                System.out.println("✅ Migrated eSIM credit to NEW collection. ID: " + esimCredit.getId());
-                                            }
-                                        }
-                                    }
-                                    
-                                    if (esimCredit != null) {
-                                        System.out.println("📊 BEFORE - eSIM Credit Limit: " + esimCredit.getCreditLimit());
-                                        System.out.println("📊 BEFORE - eSIM Available Credit: " + esimCredit.getAvailableCredit());
-                                        System.out.println("📊 BEFORE - eSIM Used Credit: " + esimCredit.getUsedCredit());
+                                        // Deduct from unified credit limit (used for both eSIM and ePIN)
+                                        limit.useCredit(salePriceFromPOS, savedPosSale.getId(), 
+                                            "eSIM POS Sale: " + pool.getName() + " to " + customerEmail);
                                         
-                                        // Use eSIM credit from separate collection with POS sale reference
-                                        esimCredit.useCredit(salePriceFromPOS, savedPosSale.getId(), 
-                                            "eSIM POS Sale #" + savedPosSale.getId() + ": " + pool.getName() + " to " + customerEmail);
+                                        System.out.println("📊 AFTER useCredit() - Available: " + limit.getAvailableCredit());
+                                        System.out.println("📊 AFTER useCredit() - Used: " + limit.getUsedCredit());
                                         
-                                        System.out.println("📊 AFTER useCredit() - eSIM Available: " + esimCredit.getAvailableCredit());
-                                        System.out.println("📊 AFTER useCredit() - eSIM Used: " + esimCredit.getUsedCredit());
-                                        
-                                        RetailerEsimCredit savedCredit = retailerEsimCreditRepository.save(esimCredit);
-                                        System.out.println("✅ eSIM Credit DEDUCTED using POS Sale price: " + salePriceFromPOS);
-                                        System.out.println("📊 SAVED - eSIM Available Credit: " + savedCredit.getAvailableCredit());
-                                        System.out.println("📊 SAVED - eSIM Used Credit: " + savedCredit.getUsedCredit());
-                                        System.out.println("=== eSIM CREDIT DEDUCTION COMPLETE ===\n");
+                                        RetailerLimit savedLimit = retailerLimitRepository.save(limit);
+                                        System.out.println("✅ UNIFIED CREDIT DEDUCTED using POS Sale price: " + salePriceFromPOS);
+                                        System.out.println("📊 SAVED - Available Credit: " + savedLimit.getAvailableCredit());
+                                        System.out.println("📊 SAVED - Used Credit: " + savedLimit.getUsedCredit());
+                                        System.out.println("=== UNIFIED CREDIT DEDUCTION COMPLETE ===\n");
                                         
                                         // Update the POS sale with credit deduction info
                                         savedPosSale.setNotes("Credit deducted: " + salePriceFromPOS + " NOK");
                                         esimPosSaleRepository.save(savedPosSale);
                                         
                                         // Store updated credit info for response
-                                        order.setNotes(order.getNotes() + " | eSIM Credit Updated from POS Sale");
+                                        order.setNotes(order.getNotes() + " | Unified Credit Updated from POS Sale");
                                     } else {
-                                        System.err.println("⚠️ No eSIM Credit record found for retailer: " + retailer.getId());
-                                        System.err.println("⚠️ Admin needs to set eSIM credit limit for this retailer first");
-                                        
-                                        // Create new eSIM credit record to track usage even without limit set
-                                        RetailerEsimCredit newEsimCredit = new RetailerEsimCredit(retailer);
-                                        newEsimCredit.setCreditLimit(BigDecimal.ZERO);
-                                        newEsimCredit.setAvailableCredit(BigDecimal.ZERO);
-                                        newEsimCredit.setUsedCredit(salePriceFromPOS);
-                                        newEsimCredit.setCreatedBy(retailerEmail);
-                                        retailerEsimCreditRepository.save(newEsimCredit);
-                                        System.out.println("📝 Created new eSIM credit record with used credit: " + salePriceFromPOS);
+                                        System.err.println("⚠️ No Credit Limit record found for retailer: " + retailer.getId());
+                                        System.err.println("⚠️ Admin needs to set credit limit for this retailer first");
                                     }
                                 }
                             } catch (Exception creditEx) {
@@ -1318,33 +1277,33 @@ public class StockController {
             response.put("iccid", iccid);
             response.put("salePrice", price);
             
-            // Include updated eSIM credit balance in response for immediate UI update
+            // Include updated unified credit balance in response for immediate UI update
             // Use retailerEmail variable instead of authentication.getName()
             if (retailerEmail != null) {
                 try {
                     var retailerOpt = userRepository.findByEmail(retailerEmail);
                     if (retailerOpt.isPresent()) {
-                        var esimCreditOpt = retailerEsimCreditRepository.findByRetailer_Id(retailerOpt.get().getId());
-                        if (esimCreditOpt.isPresent()) {
-                            RetailerEsimCredit esimCredit = esimCreditOpt.get();
+                        var limitOpt = retailerLimitRepository.findByRetailer_Id(retailerOpt.get().getId());
+                        if (limitOpt.isPresent()) {
+                            RetailerLimit limit = limitOpt.get();
                             Map<String, Object> creditInfo = new HashMap<>();
-                            creditInfo.put("esimCreditLimit", esimCredit.getCreditLimit() != null ? esimCredit.getCreditLimit().doubleValue() : 0.0);
-                            creditInfo.put("esimAvailableCredit", esimCredit.getAvailableCredit() != null ? esimCredit.getAvailableCredit().doubleValue() : 0.0);
-                            creditInfo.put("esimUsedCredit", esimCredit.getUsedCredit() != null ? esimCredit.getUsedCredit().doubleValue() : 0.0);
+                            creditInfo.put("creditLimit", limit.getCreditLimit() != null ? limit.getCreditLimit().doubleValue() : 0.0);
+                            creditInfo.put("availableCredit", limit.getAvailableCredit() != null ? limit.getAvailableCredit().doubleValue() : 0.0);
+                            creditInfo.put("usedCredit", limit.getUsedCredit() != null ? limit.getUsedCredit().doubleValue() : 0.0);
                             
                             // Calculate usage percentage
-                            if (esimCredit.getCreditLimit() != null && esimCredit.getCreditLimit().compareTo(BigDecimal.ZERO) > 0) {
-                                double usagePercentage = esimCredit.getUsedCredit()
+                            if (limit.getCreditLimit() != null && limit.getCreditLimit().compareTo(BigDecimal.ZERO) > 0) {
+                                double usagePercentage = limit.getUsedCredit()
                                     .multiply(BigDecimal.valueOf(100))
-                                    .divide(esimCredit.getCreditLimit(), 2, java.math.RoundingMode.HALF_UP)
+                                    .divide(limit.getCreditLimit(), 2, java.math.RoundingMode.HALF_UP)
                                     .doubleValue();
-                                creditInfo.put("esimCreditUsagePercentage", usagePercentage);
+                                creditInfo.put("creditUsagePercentage", usagePercentage);
                             } else {
-                                creditInfo.put("esimCreditUsagePercentage", 0.0);
+                                creditInfo.put("creditUsagePercentage", 0.0);
                             }
                             
                             response.put("updatedCredit", creditInfo);
-                            System.out.println("📊 Response includes updated eSIM credit: " + creditInfo);
+                            System.out.println("📊 Response includes updated unified credit: " + creditInfo);
                         }
                     }
                 } catch (Exception ex) {

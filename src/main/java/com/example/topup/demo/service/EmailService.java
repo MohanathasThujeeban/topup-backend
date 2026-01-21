@@ -889,434 +889,107 @@ public class EmailService {
     private String generateEsimApprovalHtml(String customerName, String orderNumber, 
                                            String esimSerial, String qrCodeBase64,
                                            String activationCode, String smDpAddress, String bundlePrice) {
-        // Telelys template with placeholders
         String template = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Your eSIM is Ready - Telelys</title>
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    body {
-      font-family: 'Arial', 'Helvetica', sans-serif;
-      line-height: 1.6;
-      color: #333;
-      background-color: #f5f5f5;
-    }
-    .container {
-      max-width: 600px;
-      margin: 20px auto;
-      background: white;
-      border-radius: 8px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-      overflow: hidden;
-    }
-    .header {
-      background-color: #2563EB;
-      color: white;
-      padding: 30px;
-      text-align: center;
-    }
-    .logo-text {
-      font-size: 32px;
-      font-weight: bold;
-      margin-bottom: 10px;
-    }
-    .subheader {
-      font-size: 18px;
-      font-weight: 300;
-    }
-    .content {
-      padding: 30px;
-    }
-    h1 {
-      color: #1F2937;
-      font-size: 24px;
-      margin-bottom: 10px;
-      font-weight: bold;
-    }
-    .intro {
-      color: #666;
-      margin-bottom: 25px;
-      font-size: 16px;
-    }
-    h2 {
-      color: #1F2937;
-      font-size: 18px;
-      margin-top: 25px;
-      margin-bottom: 15px;
-      font-weight: bold;
-      border-bottom: 2px solid #2563EB;
-      padding-bottom: 10px;
-    }
-    .info-box {
-      background-color: #f9fafb;
-      border-left: 4px solid #2563EB;
-      padding: 15px;
-      margin-bottom: 20px;
-      border-radius: 4px;
-    }
-    .info-item {
-      display: flex;
-      justify-content: space-between;
-      padding: 8px 0;
-      border-bottom: 1px solid #e5e7eb;
-    }
-    .info-item:last-child {
-      border-bottom: none;
-    }
-    .info-label {
-      color: #6B7280;
-      font-weight: 500;
-    }
-    .info-value {
-      color: #1F2937;
-      font-weight: bold;
-    }
-    .important-list {
-      list-style: none;
-      margin: 15px 0;
-    }
-    .important-list li {
-      padding: 10px 0;
-      padding-left: 25px;
-      position: relative;
-      color: #555;
-    }
-    .important-list li:before {
-      content: "•";
-      color: #2563EB;
-      font-weight: bold;
-      position: absolute;
-      left: 0;
-    }
-    .steps {
-      margin: 20px 0;
-    }
-    .step {
-      margin-bottom: 20px;
-      padding-left: 30px;
-      position: relative;
-    }
-    .step-number {
-      position: absolute;
-      left: 0;
-      top: 0;
-      width: 24px;
-      height: 24px;
-      background: #2563EB;
-      color: white;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 14px;
-      font-weight: bold;
-    }
-    .step-title {
-      font-weight: bold;
-      color: #1F2937;
-      margin-bottom: 5px;
-    }
-    .step-desc {
-      color: #666;
-      font-size: 14px;
-      line-height: 1.5;
-    }
-    .activation-info {
-      background-color: #f9fafb;
-      border: 1px solid #e5e7eb;
-      padding: 15px;
-      margin: 15px 0;
-      border-radius: 4px;
-      font-size: 14px;
-    }
-    .activation-info p {
-      margin: 8px 0;
-    }
-    .activation-label {
-      font-weight: bold;
-      color: #1F2937;
-    }
-    .activation-value {
-      color: #666;
-      word-break: break-all;
-      font-family: monospace;
-      background: white;
-      padding: 5px;
-      border-radius: 3px;
-      display: inline-block;
-      margin-top: 3px;
-    }
-    .warning {
-      color: #D32F2F;
-      font-weight: bold;
-      margin: 10px 0;
-    }
-    .qr-section {
-      text-align: center;
-      margin: 25px 0;
-      padding: 20px;
-      background-color: #f9fafb;
-      border-radius: 8px;
-    }
-    .qr-label {
-      font-weight: bold;
-      color: #1F2937;
-      margin-bottom: 15px;
-      display: block;
-      font-size: 16px;
-    }
-    .qr-image {
-      width: 200px !important;
-      height: 200px !important;
-      max-width: 200px !important;
-      max-height: 200px !important;
-      border: 2px solid #2563EB;
-      padding: 10px;
-      border-radius: 8px;
-      background: white;
-      display: inline-block;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    .footer-note {
-      color: #9CA3AF;
-      font-size: 12px;
-      margin-top: 15px;
-      font-style: italic;
-    }
-    .support-box {
-      background-color: #FEF3C7;
-      border-left: 4px solid #F59E0B;
-      padding: 15px;
-      margin: 20px 0;
-      border-radius: 4px;
-    }
-    .support-title {
-      font-weight: bold;
-      color: #92400E;
-      margin-bottom: 10px;
-    }
-    .support-item {
-      color: #78350F;
-      margin: 5px 0;
-    }
-    .troubleshooting-item {
-      margin-bottom: 15px;
-      padding-left: 20px;
-      position: relative;
-    }
-    .troubleshooting-item:before {
-      content: "→";
-      color: #2563EB;
-      font-weight: bold;
-      position: absolute;
-      left: 0;
-    }
-    .troubleshooting-title {
-      font-weight: bold;
-      color: #1F2937;
-      margin-bottom: 5px;
-    }
-    .troubleshooting-desc {
-      color: #666;
-      font-size: 14px;
-    }
-    .email-footer {
-      background-color: #1F2937;
-      color: #9CA3AF;
-      padding: 20px;
-      text-align: center;
-      font-size: 13px;
-    }
-    .footer-text {
-      margin: 10px 0;
-    }
-    a {
-      color: #2563EB;
-      text-decoration: none;
-    }
-    a:hover {
-      text-decoration: underline;
-    }
-    @media only screen and (max-width: 600px) {
-      .container {
-        margin: 10px;
-      }
-      .content {
-        padding: 20px;
-      }
-      .qr-image {
-        max-width: 200px;
-      }
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Your eSIM is Ready</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Arial,sans-serif;line-height:1.5;color:#333;background:#f5f5f5}
+.container{max-width:600px;margin:10px auto;background:#fff;border-radius:8px;overflow:hidden}
+.header{background:#2563EB;color:#fff;padding:20px;text-align:center}
+.logo-text{font-size:28px;font-weight:bold;margin-bottom:5px}
+.subheader{font-size:16px}
+.content{padding:20px}
+h1{color:#1F2937;font-size:20px;margin-bottom:8px}
+.intro{color:#666;margin-bottom:15px;font-size:14px}
+h2{color:#1F2937;font-size:16px;margin-top:15px;margin-bottom:10px;border-bottom:2px solid #2563EB;padding-bottom:5px}
+.info-box{background:#f9fafb;border-left:4px solid #2563EB;padding:10px;margin-bottom:15px;border-radius:4px}
+.info-item{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #e5e7eb}
+.info-item:last-child{border-bottom:none}
+.info-label{color:#6B7280;font-weight:500;font-size:13px}
+.info-value{color:#1F2937;font-weight:bold;font-size:13px}
+.important-list{list-style:none;margin:10px 0}
+.important-list li{padding:5px 0 5px 20px;position:relative;color:#555;font-size:13px}
+.important-list li:before{content:"•";color:#2563EB;font-weight:bold;position:absolute;left:0}
+.steps{margin:10px 0}
+.step{margin-bottom:12px;padding-left:25px;position:relative}
+.step-number{position:absolute;left:0;top:0;width:20px;height:20px;background:#2563EB;color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold}
+.step-title{font-weight:bold;color:#1F2937;margin-bottom:3px;font-size:13px}
+.step-desc{color:#666;font-size:12px;line-height:1.4}
+.activation-info{background:#f9fafb;border:1px solid #e5e7eb;padding:10px;margin:8px 0;border-radius:4px;font-size:12px}
+.activation-info p{margin:5px 0}
+.activation-label{font-weight:bold;color:#1F2937}
+.activation-value{color:#666;word-break:break-all;font-family:monospace;background:#fff;padding:3px;border-radius:3px;display:inline-block;margin-top:2px;font-size:11px}
+.warning{color:#D32F2F;font-weight:bold;margin:5px 0;font-size:12px}
+.qr-section{text-align:center;margin:20px 0;padding:15px;background:#f9fafb;border-radius:8px}
+.qr-label{font-weight:bold;color:#1F2937;margin-bottom:10px;display:block;font-size:14px}
+.qr-image{width:200px !important;height:200px !important;max-width:200px !important;max-height:200px !important;border:2px solid #2563EB;padding:10px;border-radius:8px;background:#fff;display:inline-block;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
+.support-box{background:#FEF3C7;border-left:4px solid #F59E0B;padding:10px;margin:15px 0;border-radius:4px}
+.support-title{font-weight:bold;color:#92400E;margin-bottom:5px;font-size:13px}
+.support-item{color:#78350F;margin:3px 0;font-size:12px}
+.email-footer{background:#1F2937;color:#9CA3AF;padding:15px;text-align:center;font-size:12px}
+.footer-text{margin:5px 0}
+a{color:#2563EB;text-decoration:none}
+a:hover{text-decoration:underline}
+@media only screen and (max-width:600px){.container{margin:5px}.content{padding:15px}}
+</style>
 </head>
 <body>
-  <div class="container">
-    <div class="header">
-      <div class="logo-text">Telelys</div>
-      <div class="subheader">Your eSIM is Ready!</div>
-    </div>
-
-    <div class="content">
-      <h1>Thank you for choosing Telelys</h1>
-      <p class="intro">You can find details of your eSIM and setup instructions below.</p>
-
-      <h2>Your eSIM Information</h2>
-      <div class="info-box">
-        <div class="info-item">
-          <span class="info-label">Date:</span>
-          <span class="info-value">{{DATE}}</span>
-        </div>
-        <div class="info-item">
-          <span class="info-label">Order ID:</span>
-          <span class="info-value">{{ORDER_ID}}</span>
-        </div>
-        <div class="info-item">
-          <span class="info-label">Bundle Name:</span>
-          <span class="info-value">{{BUNDLE_NAME}}</span>
-        </div>
-        <div class="info-item">
-          <span class="info-label">Bundle Price:</span>
-          <span class="info-value">{{BUNDLE_PRICE}}</span>
-        </div>
-      </div>
-
-      <h2>Important Notes Before Setting Up</h2>
-      <ul class="important-list">
-        <li>eSIM can only be installed when there is an internet connection.</li>
-        <li>Please do not delete eSIM after activation. The eSIM QR code can only be activated once.</li>
-        <li>eSIM cannot be transferred to another device after installation.</li>
-      </ul>
-
-      <h2>eSIM Setup Guide - For iOS</h2>
-      <div class="steps">
-        <div class="step">
-          <div class="step-number">1</div>
-          <div class="step-title">Go to Settings > Cellular (or Mobile Data)</div>
-        </div>
-
-        <div class="step">
-          <div class="step-number">2</div>
-          <div class="step-title">Click Add eSIM or Add Cellular Plan > Choose Use QR Code</div>
-          <div class="step-desc">Scan the below QR or tap Enter Details Manually and enter the activation code if you cannot use your device to scan your QR. Besides, you can choose Open Photos to upload the image of QR code.</div>
-        </div>
-
-        <div class="step">
-          <div class="step-number">3</div>
-          <div class="step-title">Activation Information</div>
-          <div class="activation-info">
-            <p><span class="activation-label">SM-DP+ Address:</span><br><span class="activation-value">{{SM_DP_ADDRESS}}</span></p>
-            <p><span class="activation-label">Activation Code:</span><br><span class="activation-value">{{ACTIVATION_CODE}}</span></p>
-          </div>
-          <div class="warning">Don't delete eSIM after setting up</div>
-        </div>
-
-        <div class="step">
-          <div class="step-number">4</div>
-          <div class="step-title">Click Next to finish the installation</div>
-        </div>
-
-        <div class="step">
-          <div class="step-number">5</div>
-          <div class="step-title">SIM Registration Required</div>
-          <div class="step-desc">Please <a href="https://www.lyca-mobile.no/en/registration/">click here to register your SIM</a></div>
-        </div>
-      </div>
-
-      <p class="footer-note">Only iOS 17 and above allows users to open QR codes from the "Photos".</p>
-
-      <!-- QR Code Section -->
-      <div class="qr-section">
-        <span class="qr-label">📱 Scan this QR Code to Activate Your eSIM</span>
-        {{QR_CODE_IMAGE}}
-        <p style="color: #6B7280; font-size: 12px; margin-top: 15px; font-style: italic;">
-          Point your camera at the QR code above to install the eSIM on your device
-        </p>
-      </div>
-
-      <h2>eSIM Setup Guide - For Android</h2>
-      <div class="steps">
-        <div class="step">
-          <div class="step-number">1</div>
-          <div class="step-title">Go to Settings > Connections</div>
-        </div>
-
-        <div class="step">
-          <div class="step-number">2</div>
-          <div class="step-title">Choose Add eSIM > Choose Use QR Code</div>
-          <div class="step-desc">Scan the below QR or tap Enter Details Manually and enter the activation code if you cannot use your device to scan your QR. Besides, you can upload the image of QR code.</div>
-        </div>
-
-        <div class="step">
-          <div class="step-number">3</div>
-          <div class="step-title">Activation Information</div>
-          <div class="activation-info">
-            <p><span class="activation-label">SM-DP+ Address:</span><br><span class="activation-value">{{SM_DP_ADDRESS}}</span></p>
-            <p><span class="activation-label">Activation Code:</span><br><span class="activation-value">{{ACTIVATION_CODE}}</span></p>
-          </div>
-          <div class="warning">Don't delete eSIM after setting up</div>
-        </div>
-
-        <div class="step">
-          <div class="step-number">4</div>
-          <div class="step-title">Click Next to finish the installation</div>
-        </div>
-
-        <div class="step">
-          <div class="step-number">5</div>
-          <div class="step-title">SIM Registration Required</div>
-          <div class="step-desc">Please <a href="https://www.lyca-mobile.no/en/registration/">click here to register your SIM</a></div>
-        </div>
-      </div>
-
-      <p class="footer-note">Only Samsung Galaxy S20 (and above) and some Android Phones allow users to upload QR image to set up eSIM.</p>
-
-      <div class="support-box">
-        <div class="support-title">Need Help?</div>
-        <div class="support-item"><strong>WhatsApp:</strong> {{WHATSAPP_NUMBER}}</div>
-        <div class="support-item"><strong>Email:</strong> {{SUPPORT_EMAIL}}</div>
-        <p style="margin-top: 10px; color: #78350F; font-size: 14px;">If you encounter any problems, please contact Telelys for timely support.</p>
-      </div>
-
-      <h2>If You Encounter Problems When Setting Up</h2>
-      
-      <div class="troubleshooting-item">
-        <div class="troubleshooting-title">Unable to Scan the QR Code</div>
-        <div class="troubleshooting-desc">Please try to place your phone camera opposite the QR Code and start scanning to ensure the camera captures the whole QR Code.</div>
-      </div>
-
-      <div class="troubleshooting-item">
-        <div class="troubleshooting-title">eSIM in Activating Status</div>
-        <div class="troubleshooting-desc">Successfully installed eSIM, you need to go to the country supported by your eSIM in order to start using it.</div>
-      </div>
-
-      <div class="troubleshooting-item">
-        <div class="troubleshooting-title">eSIM Installed but No Signal (3G/4G)</div>
-        <div class="troubleshooting-desc">Please check that you have enabled Data Roaming mode and Cellular Data mode on your phone.</div>
-      </div>
-
-      <div class="troubleshooting-item">
-        <div class="troubleshooting-title">Network Signal Shows but Internet Not Available</div>
-        <div class="troubleshooting-desc">It might be an APN issue. Please read the instruction to check APN and change the APN section on your device to: {{APN_SETTINGS}}</div>
-      </div>
-    </div>
-
-    <div class="email-footer">
-      <div class="footer-text">&copy; 2026 Telelys. All rights reserved.</div>
-      <div class="footer-text">
-        <a href="https://www.lyca-mobile.no/" style="color: #9CA3AF;">Visit our website</a> | 
-        <a href="https://www.lyca-mobile.no/en/registration/" style="color: #9CA3AF;">Register SIM</a>
-      </div>
-    </div>
-  </div>
+<div class="container">
+<div class="header">
+<div class="logo-text">Telelys</div>
+<div class="subheader">Your eSIM is Ready!</div>
+</div>
+<div class="content">
+<h1>Thank you for choosing Telelys</h1>
+<p class="intro">You can find your eSIM details and setup instructions below.</p>
+<h2>Your eSIM Information</h2>
+<div class="info-box">
+<div class="info-item"><span class="info-label">Date:</span><span class="info-value">{{DATE}}</span></div>
+<div class="info-item"><span class="info-label">Order ID:</span><span class="info-value">{{ORDER_ID}}</span></div>
+<div class="info-item"><span class="info-label">Bundle Name:</span><span class="info-value">{{BUNDLE_NAME}}</span></div>
+<div class="info-item"><span class="info-label">Bundle Price:</span><span class="info-value">{{BUNDLE_PRICE}}</span></div>
+</div>
+<h2>Important Notes</h2>
+<ul class="important-list">
+<li>eSIM requires an internet connection to install</li>
+<li>Do not delete eSIM after activation - QR code can only be used once</li>
+<li>eSIM cannot be transferred to another device</li>
+</ul>
+<h2>📋 Setup Guide (iOS & Android)</h2>
+<div class="steps">
+<div class="step"><span class="step-number">1</span><span class="step-title">⚙️ Open Settings</span><div class="step-desc">Go to Settings > Cellular/Mobile Data (iOS) or Connections (Android)</div></div>
+<div class="step"><span class="step-number">2</span><span class="step-title">➕ Add eSIM</span><div class="step-desc">Select "Add eSIM" or "Add Cellular Plan" > Choose "Use QR Code"</div></div>
+<div class="step"><span class="step-number">3</span><span class="step-title">📸 Scan QR Code</span><div class="step-desc">Scan the QR code below (or enter details manually if needed)</div>
+<div class="activation-info">
+<p><span class="activation-label">SM-DP+ Address:</span><br><span class="activation-value">{{SM_DP_ADDRESS}}</span></p>
+<p><span class="activation-label">Activation Code:</span><br><span class="activation-value">{{ACTIVATION_CODE}}</span></p>
+</div>
+<div class="warning">⚠️ Don't delete eSIM after setup</div>
+</div>
+<div class="step"><span class="step-number">4</span><span class="step-title">✅ Complete & Register</span><div class="step-desc">Finish installation and <a href="https://www.lyca-mobile.no/en/registration/">register your SIM here</a></div></div>
+</div>
+<!-- QR Code Section -->
+<div class="qr-section">
+<span class="qr-label">📱 Scan this QR Code to Activate Your eSIM</span>
+{{QR_CODE_IMAGE}}
+<p style="color:#6B7280;font-size:11px;margin-top:10px;font-style:italic">Point your camera at the QR code to install the eSIM</p>
+</div>
+<div class="support-box">
+<div class="support-title">Need Help?</div>
+<div class="support-item"><strong>WhatsApp:</strong> {{WHATSAPP_NUMBER}}</div>
+<div class="support-item"><strong>Email:</strong> {{SUPPORT_EMAIL}}</div>
+</div>
+</div>
+<div class="email-footer">
+<div class="footer-text">&copy; 2026 Telelys. All rights reserved.</div>
+<div class="footer-text"><a href="https://www.lyca-mobile.no/" style="color:#9CA3AF">Visit Website</a> | <a href="https://www.lyca-mobile.no/en/registration/" style="color:#9CA3AF">Register SIM</a></div>
+</div>
+</div>
 </body>
 </html>
             """;
@@ -1788,361 +1461,105 @@ public class EmailService {
             // Decode base64 QR code to bytes
             byte[] qrCodeBytes = java.util.Base64.getDecoder().decode(qrCodeBase64);
             
-            // Create HTML email using Telelys template
             String htmlContent = String.format("""
-                <!DOCTYPE html>
-                <html lang="en">
-                <head>
-                  <meta charset="UTF-8">
-                  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                  <title>Your eSIM is Ready - Telelys</title>
-                  <style>
-                    * {
-                      margin: 0;
-                      padding: 0;
-                      box-sizing: border-box;
-                    }
-                    body {
-                      font-family: 'Arial', 'Helvetica', sans-serif;
-                      line-height: 1.6;
-                      color: #333;
-                      background-color: #f5f5f5;
-                    }
-                    .container {
-                      max-width: 600px;
-                      margin: 20px auto;
-                      background: white;
-                      border-radius: 8px;
-                      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-                      overflow: hidden;
-                    }
-                    .header {
-                      background-color: #2563EB;
-                      color: white;
-                      padding: 30px;
-                      text-align: center;
-                    }
-                    .logo-text {
-                      font-size: 32px;
-                      font-weight: bold;
-                      margin-bottom: 10px;
-                    }
-                    .subheader {
-                      font-size: 18px;
-                      font-weight: 300;
-                    }
-                    .content {
-                      padding: 30px;
-                    }
-                    h1 {
-                      color: #1F2937;
-                      font-size: 24px;
-                      margin-bottom: 10px;
-                      font-weight: bold;
-                    }
-                    .intro {
-                      color: #666;
-                      margin-bottom: 25px;
-                      font-size: 16px;
-                    }
-                    h2 {
-                      color: #1F2937;
-                      font-size: 18px;
-                      margin-top: 25px;
-                      margin-bottom: 15px;
-                      font-weight: bold;
-                      border-bottom: 2px solid #2563EB;
-                      padding-bottom: 10px;
-                    }
-                    .info-box {
-                      background-color: #f9fafb;
-                      border-left: 4px solid #2563EB;
-                      padding: 15px;
-                      margin-bottom: 20px;
-                      border-radius: 4px;
-                    }
-                    .info-item {
-                      display: flex;
-                      justify-content: space-between;
-                      padding: 8px 0;
-                      border-bottom: 1px solid #e5e7eb;
-                    }
-                    .info-item:last-child {
-                      border-bottom: none;
-                    }
-                    .info-label {
-                      color: #6B7280;
-                      font-weight: 500;
-                    }
-                    .info-value {
-                      color: #1F2937;
-                      font-weight: bold;
-                      font-family: monospace;
-                    }
-                    .qr-section {
-                      text-align: center;
-                      margin: 25px 0;
-                    }
-                    .qr-label {
-                      font-weight: bold;
-                      color: #1F2937;
-                      margin-bottom: 15px;
-                      display: block;
-                    }
-                    .qr-image {
-                      max-width: 300px;
-                      border: 1px solid #e5e7eb;
-                      padding: 10px;
-                      border-radius: 4px;
-                    }
-                    .important-list {
-                      list-style: none;
-                      margin: 15px 0;
-                    }
-                    .important-list li {
-                      padding: 10px 0;
-                      padding-left: 25px;
-                      position: relative;
-                      color: #555;
-                    }
-                    .important-list li:before {
-                      content: "•";
-                      color: #2563EB;
-                      font-weight: bold;
-                      position: absolute;
-                      left: 0;
-                    }
-                    .steps {
-                      margin: 20px 0;
-                    }
-                    .step {
-                      margin-bottom: 20px;
-                      padding-left: 30px;
-                      position: relative;
-                    }
-                    .step-number {
-                      position: absolute;
-                      left: 0;
-                      top: 0;
-                      width: 24px;
-                      height: 24px;
-                      background: #2563EB;
-                      color: white;
-                      border-radius: 50%;
-                      display: flex;
-                      align-items: center;
-                      justify-content: center;
-                      font-size: 14px;
-                      font-weight: bold;
-                    }
-                    .step-title {
-                      font-weight: bold;
-                      color: #1F2937;
-                      margin-bottom: 5px;
-                    }
-                    .step-desc {
-                      color: #666;
-                      font-size: 14px;
-                      line-height: 1.5;
-                    }
-                    .activation-info {
-                      background-color: #f9fafb;
-                      border: 1px solid #e5e7eb;
-                      padding: 15px;
-                      margin: 15px 0;
-                      border-radius: 4px;
-                      font-size: 14px;
-                    }
-                    .activation-info p {
-                      margin: 8px 0;
-                    }
-                    .activation-label {
-                      font-weight: bold;
-                      color: #1F2937;
-                    }
-                    .activation-value {
-                      color: #666;
-                      word-break: break-all;
-                      font-family: monospace;
-                      background: white;
-                      padding: 5px;
-                      border-radius: 3px;
-                      display: inline-block;
-                      margin-top: 3px;
-                    }
-                    .warning {
-                      color: #D32F2F;
-                      font-weight: bold;
-                      margin: 10px 0;
-                    }
-                    .support-box {
-                      background-color: #FEF3C7;
-                      border-left: 4px solid #F59E0B;
-                      padding: 15px;
-                      margin: 20px 0;
-                      border-radius: 4px;
-                    }
-                    .support-title {
-                      font-weight: bold;
-                      color: #92400E;
-                      margin-bottom: 10px;
-                    }
-                    .support-item {
-                      color: #78350F;
-                      margin: 5px 0;
-                    }
-                    .email-footer {
-                      background-color: #1F2937;
-                      color: #9CA3AF;
-                      padding: 20px;
-                      text-align: center;
-                      font-size: 13px;
-                    }
-                    .footer-text {
-                      margin: 10px 0;
-                    }
-                    a {
-                      color: #2563EB;
-                      text-decoration: none;
-                    }
-                    a:hover {
-                      text-decoration: underline;
-                    }
-                    @media only screen and (max-width: 600px) {
-                      .container {
-                        margin: 10px;
-                      }
-                      .content {
-                        padding: 20px;
-                      }
-                      .qr-image {
-                        max-width: 200px;
-                      }
-                    }
-                  </style>
-                </head>
-                <body>
-                  <div class="container">
-                    <div class="header">
-                      <div class="logo-text">Telelys</div>
-                      <div class="subheader">Your eSIM is Ready!</div>
-                    </div>
-
-                    <div class="content">
-                      <h1>Thank you for choosing Telelys</h1>
-                      <p class="intro">You can find details of your eSIM and setup instructions below.</p>
-
-                      <h2>Your eSIM Information</h2>
-                      <div class="info-box">
-                        <div class="info-item">
-                          <span class="info-label">Date:</span>
-                          <span class="info-value">%s</span>
-                        </div>
-                        <div class="info-item">
-                          <span class="info-label">Order ID:</span>
-                          <span class="info-value">%s</span>
-                        </div>
-                        <div class="info-item">
-                          <span class="info-label">ICCID:</span>
-                          <span class="info-value">%s</span>
-                        </div>
-                        <div class="info-item">
-                          <span class="info-label">Provider:</span>
-                          <span class="info-value">%s</span>
-                        </div>
-                      </div>
-
-                      <h2>Important Notes Before Setting Up</h2>
-                      <ul class="important-list">
-                        <li>eSIM can only be installed when there is an internet connection.</li>
-                        <li>Please do not delete eSIM after activation. The eSIM QR code can only be activated once.</li>
-                        <li>eSIM cannot be transferred to another device after installation.</li>
-                      </ul>
-
-                      <h2>eSIM Setup Guide - For iOS</h2>
-                      <div class="steps">
-                        <div class="step">
-                          <div class="step-number">1</div>
-                          <div class="step-title">Go to Settings > Cellular (or Mobile Data)</div>
-                        </div>
-                        <div class="step">
-                          <div class="step-number">2</div>
-                          <div class="step-title">Click Add eSIM or Add Cellular Plan > Choose Use QR Code</div>
-                          <div class="step-desc">Scan the below QR or tap Enter Details Manually and enter the activation code.</div>
-                        </div>
-                        <div class="step">
-                          <div class="step-number">3</div>
-                          <div class="step-title">Activation Information</div>
-                          <div class="activation-info">
-                            <p><span class="activation-label">Activation Code:</span><br><span class="activation-value">%s</span></p>
-                          </div>
-                          <div class="warning">Don't delete eSIM after setting up</div>
-                        </div>
-                        <div class="step">
-                          <div class="step-number">4</div>
-                          <div class="step-title">Click Next to finish the installation</div>
-                        </div>
-                        <div class="step">
-                          <div class="step-number">5</div>
-                          <div class="step-title">SIM Registration Required</div>
-                          <div class="step-desc">Please <a href="https://www.lyca-mobile.no/en/registration/">click here to register your SIM</a></div>
-                        </div>
-                      </div>
-
-                      <div class="qr-section">
-                        <span class="qr-label">Scan this QR Code</span>
-                        <img src="cid:qrCodeImage" alt="eSIM QR Code" class="qr-image" />
-                      </div>
-
-                      <h2>eSIM Setup Guide - For Android</h2>
-                      <div class="steps">
-                        <div class="step">
-                          <div class="step-number">1</div>
-                          <div class="step-title">Go to Settings > Connections</div>
-                        </div>
-                        <div class="step">
-                          <div class="step-number">2</div>
-                          <div class="step-title">Choose Add eSIM > Choose Use QR Code</div>
-                          <div class="step-desc">Scan the below QR or tap Enter Details Manually and enter the activation code.</div>
-                        </div>
-                        <div class="step">
-                          <div class="step-number">3</div>
-                          <div class="step-title">Activation Information</div>
-                          <div class="activation-info">
-                            <p><span class="activation-label">Activation Code:</span><br><span class="activation-value">%s</span></p>
-                          </div>
-                          <div class="warning">Don't delete eSIM after setting up</div>
-                        </div>
-                        <div class="step">
-                          <div class="step-number">4</div>
-                          <div class="step-title">Click Next to finish the installation</div>
-                        </div>
-                        <div class="step">
-                          <div class="step-number">5</div>
-                          <div class="step-title">SIM Registration Required</div>
-                          <div class="step-desc">Please <a href="https://www.lyca-mobile.no/en/registration/">click here to register your SIM</a></div>
-                        </div>
-                      </div>
-
-                      <div class="support-box">
-                        <div class="support-title">Need Help?</div>
-                        <div class="support-item"><strong>WhatsApp:</strong> +47 (WhatsApp)</div>
-                        <div class="support-item"><strong>Email:</strong> %s</div>
-                        <p style="margin-top: 10px; color: #78350F; font-size: 14px;">If you encounter any problems, please contact Telelys for timely support.</p>
-                      </div>
-                    </div>
-
-                    <div class="email-footer">
-                      <div class="footer-text">&copy; 2026 Telelys. All rights reserved.</div>
-                      <div class="footer-text">
-                        <a href="https://www.lyca-mobile.no/" style="color: #9CA3AF;">Visit our website</a> | 
-                        <a href="https://www.lyca-mobile.no/en/registration/" style="color: #9CA3AF;">Register SIM</a>
-                      </div>
-                    </div>
-                  </div>
-                </body>
-                </html>
-                """,
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Your eSIM is Ready</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Arial,sans-serif;line-height:1.5;color:#333;background:#f5f5f5}
+.container{max-width:600px;margin:10px auto;background:#fff;border-radius:8px;overflow:hidden}
+.header{background:#2563EB;color:#fff;padding:20px;text-align:center}
+.logo-text{font-size:28px;font-weight:bold;margin-bottom:5px}
+.subheader{font-size:16px}
+.content{padding:20px}
+h1{color:#1F2937;font-size:20px;margin-bottom:8px}
+.intro{color:#666;margin-bottom:15px;font-size:14px}
+h2{color:#1F2937;font-size:16px;margin-top:15px;margin-bottom:10px;border-bottom:2px solid #2563EB;padding-bottom:5px}
+.info-box{background:#f9fafb;border-left:4px solid #2563EB;padding:10px;margin-bottom:15px;border-radius:4px}
+.info-item{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #e5e7eb}
+.info-item:last-child{border-bottom:none}
+.info-label{color:#6B7280;font-weight:500;font-size:13px}
+.info-value{color:#1F2937;font-weight:bold;font-family:monospace;font-size:13px}
+.qr-section{text-align:center;margin:20px 0}
+.qr-label{font-weight:bold;color:#1F2937;margin-bottom:10px;display:block;font-size:14px}
+.qr-image{max-width:280px;border:1px solid #e5e7eb;padding:10px;border-radius:4px}
+.important-list{list-style:none;margin:10px 0}
+.important-list li{padding:5px 0 5px 20px;position:relative;color:#555;font-size:13px}
+.important-list li:before{content:"•";color:#2563EB;font-weight:bold;position:absolute;left:0}
+.steps{margin:10px 0}
+.step{margin-bottom:12px;padding-left:25px;position:relative}
+.step-number{position:absolute;left:0;top:0;width:20px;height:20px;background:#2563EB;color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold}
+.step-title{font-weight:bold;color:#1F2937;margin-bottom:3px;font-size:13px}
+.step-desc{color:#666;font-size:12px;line-height:1.4}
+.activation-info{background:#f9fafb;border:1px solid #e5e7eb;padding:10px;margin:8px 0;border-radius:4px;font-size:12px}
+.activation-info p{margin:5px 0}
+.activation-label{font-weight:bold;color:#1F2937}
+.activation-value{color:#666;word-break:break-all;font-family:monospace;background:#fff;padding:3px;border-radius:3px;display:inline-block;margin-top:2px;font-size:11px}
+.warning{color:#D32F2F;font-weight:bold;margin:5px 0;font-size:12px}
+.support-box{background:#FEF3C7;border-left:4px solid #F59E0B;padding:10px;margin:15px 0;border-radius:4px}
+.support-title{font-weight:bold;color:#92400E;margin-bottom:5px;font-size:13px}
+.support-item{color:#78350F;margin:3px 0;font-size:12px}
+.email-footer{background:#1F2937;color:#9CA3AF;padding:15px;text-align:center;font-size:12px}
+.footer-text{margin:5px 0}
+a{color:#2563EB;text-decoration:none}
+a:hover{text-decoration:underline}
+@media only screen and (max-width:600px){.container{margin:5px}.content{padding:15px}.qr-image{max-width:220px}}
+</style>
+</head>
+<body>
+<div class="container">
+<div class="header">
+<div class="logo-text">Telelys</div>
+<div class="subheader">Your eSIM is Ready!</div>
+</div>
+<div class="content">
+<h1>Thank you for choosing Telelys</h1>
+<p class="intro">You can find your eSIM details and setup instructions below.</p>
+<h2>Your eSIM Information</h2>
+<div class="info-box">
+<div class="info-item"><span class="info-label">Date:</span><span class="info-value">%s</span></div>
+<div class="info-item"><span class="info-label">Order ID:</span><span class="info-value">%s</span></div>
+<div class="info-item"><span class="info-label">ICCID:</span><span class="info-value">%s</span></div>
+<div class="info-item"><span class="info-label">Provider:</span><span class="info-value">%s</span></div>
+</div>
+<h2>Important Notes</h2>
+<ul class="important-list">
+<li>eSIM requires an internet connection to install</li>
+<li>Do not delete eSIM after activation - QR code can only be used once</li>
+<li>eSIM cannot be transferred to another device</li>
+</ul>
+<h2>📋 Setup Guide (iOS & Android)</h2>
+<div class="steps">
+<div class="step"><span class="step-number">1</span><span class="step-title">⚙️ Open Settings</span><div class="step-desc">Go to Settings > Cellular/Mobile Data (iOS) or Connections (Android)</div></div>
+<div class="step"><span class="step-number">2</span><span class="step-title">➕ Add eSIM</span><div class="step-desc">Select "Add eSIM" or "Add Cellular Plan" > Choose "Use QR Code"</div></div>
+<div class="step"><span class="step-number">3</span><span class="step-title">📸 Scan QR Code</span><div class="step-desc">Scan the QR code below (or enter details manually if needed)</div>
+<div class="activation-info"><p><span class="activation-label">Activation Code:</span><br><span class="activation-value">%s</span></p></div>
+<div class="warning">⚠️ Don't delete eSIM after setup</div>
+</div>
+<div class="step"><span class="step-number">4</span><span class="step-title">✅ Complete & Register</span><div class="step-desc">Finish installation and <a href="https://www.lyca-mobile.no/en/registration/">register your SIM here</a></div></div>
+</div>
+<div class="qr-section">
+<span class="qr-label">📱 Scan this QR Code</span>
+<img src="cid:qrCodeImage" alt="eSIM QR Code" class="qr-image"/>
+</div>
+<div class="support-box">
+<div class="support-title">Need Help?</div>
+<div class="support-item"><strong>WhatsApp:</strong> +47 (WhatsApp)</div>
+<div class="support-item"><strong>Email:</strong> %s</div>
+</div>
+</div>
+<div class="email-footer">
+<div class="footer-text">&copy; 2026 Telelys. All rights reserved.</div>
+<div class="footer-text"><a href="https://www.lyca-mobile.no/" style="color:#9CA3AF">Visit Website</a> | <a href="https://www.lyca-mobile.no/en/registration/" style="color:#9CA3AF">Register SIM</a></div>
+</div>
+</div>
+</body>
+</html>
+""",
                 java.time.LocalDate.now().toString(),
                 passportId,
                 iccid,

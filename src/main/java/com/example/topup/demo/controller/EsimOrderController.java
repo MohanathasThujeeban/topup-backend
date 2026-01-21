@@ -219,14 +219,14 @@ public class EsimOrderController {
                     if (limitOpt.isPresent()) {
                         RetailerLimit limit = limitOpt.get();
                         
-                        // Deduct the sale amount from eSIM credit limit (separate from general credit)
-                        limit.useEsimCredit(BigDecimal.valueOf(request.getAmount()), 
+                        // Deduct the sale amount from unified credit limit (used for both eSIM and ePIN)
+                        limit.useCredit(BigDecimal.valueOf(request.getAmount()), 
                                         savedRetailerOrder.getId(), 
                                         "eSIM Sale: " + request.getProductName() + " to " + request.getCustomerEmail());
                         
                         retailerLimitRepository.save(limit);
-                        System.out.println("✅ Updated eSIM credit limit for retailer: " + retailerId);
-                        System.out.println("   eSIM Used: " + limit.getEsimUsedCredit() + ", Available: " + limit.getEsimAvailableCredit());
+                        System.out.println("✅ Updated credit limit for retailer: " + retailerId);
+                        System.out.println("   Used: " + limit.getUsedCredit() + ", Available: " + limit.getAvailableCredit());
                     } else {
                         System.out.println("⚠️ No credit limit found for retailer: " + retailerId);
                     }

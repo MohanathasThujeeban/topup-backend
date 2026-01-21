@@ -12,12 +12,10 @@ import com.example.topup.demo.service.StockService;
 import com.example.topup.demo.service.AdminService;
 import com.example.topup.demo.entity.StockPool;
 import com.example.topup.demo.entity.RetailerLimit;
-import com.example.topup.demo.entity.RetailerEsimCredit;
 import com.example.topup.demo.entity.RetailerKickbackLimit;
 import com.example.topup.demo.repository.RetailerOrderRepository;
 import com.example.topup.demo.repository.OrderRepository;
 import com.example.topup.demo.repository.RetailerLimitRepository;
-import com.example.topup.demo.repository.RetailerEsimCreditRepository;
 import com.example.topup.demo.repository.RetailerKickbackLimitRepository;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -67,9 +65,6 @@ public class RetailerController {
     
     @Autowired
     private RetailerLimitRepository retailerLimitRepository;
-
-    @Autowired
-    private RetailerEsimCreditRepository retailerEsimCreditRepository;
 
     @Autowired
     private RetailerKickbackLimitRepository retailerKickbackLimitRepository;
@@ -670,30 +665,6 @@ public class RetailerController {
             // Fetch credit limit from retailer_limits collection
             Optional<RetailerLimit> limitOpt = retailerLimitRepository.findByRetailer_Id(retailer.getId());
             
-            // Fetch eSIM credit from SEPARATE retailer_esim_credits collection
-            Optional<RetailerEsimCredit> esimCreditOpt = retailerEsimCreditRepository.findByRetailer_Id(retailer.getId());
-            
-            // If no eSIM credit in new collection, check old collection and migrate
-            if (!esimCreditOpt.isPresent() && limitOpt.isPresent()) {
-                RetailerLimit oldLimit = limitOpt.get();
-                BigDecimal oldEsimCreditLimit = oldLimit.getEsimCreditLimit();
-                
-                if (oldEsimCreditLimit != null && oldEsimCreditLimit.compareTo(BigDecimal.ZERO) > 0) {
-                    System.out.println("📊 Migrating eSIM credit from OLD collection to NEW collection...");
-                    
-                    // Create new record in retailer_esim_credits collection
-                    RetailerEsimCredit newEsimCredit = new RetailerEsimCredit(retailer);
-                    newEsimCredit.setCreditLimit(oldEsimCreditLimit);
-                    newEsimCredit.setUsedCredit(oldLimit.getEsimUsedCredit() != null ? oldLimit.getEsimUsedCredit() : BigDecimal.ZERO);
-                    newEsimCredit.setAvailableCredit(oldLimit.getEsimAvailableCredit() != null ? oldLimit.getEsimAvailableCredit() : oldEsimCreditLimit);
-                    newEsimCredit.setCreatedBy("system-migration");
-                    RetailerEsimCredit savedCredit = retailerEsimCreditRepository.save(newEsimCredit);
-                    esimCreditOpt = Optional.of(savedCredit);
-                    
-                    System.out.println("✅ Migrated eSIM credit to NEW collection. ID: " + savedCredit.getId());
-                }
-            }
-            
             Map<String, Object> response = new HashMap<>();
             
             if (limitOpt.isPresent()) {
@@ -736,38 +707,6 @@ public class RetailerController {
                 response.put("status", "NOT_SET");
                 response.put("outstandingAmount", 0.0);
                 response.put("message", "No credit limit set by admin yet");
-            }
-            
-            // eSIM Credit fields from SEPARATE collection
-            if (esimCreditOpt.isPresent()) {
-                RetailerEsimCredit esimCredit = esimCreditOpt.get();
-                response.put("esimCreditLimit", esimCredit.getCreditLimit() != null ? esimCredit.getCreditLimit().doubleValue() : 0.0);
-                response.put("esimUsedCredit", esimCredit.getUsedCredit() != null ? esimCredit.getUsedCredit().doubleValue() : 0.0);
-                response.put("esimAvailableCredit", esimCredit.getAvailableCredit() != null ? esimCredit.getAvailableCredit().doubleValue() : 0.0);
-                
-                // Calculate eSIM credit usage percentage
-                BigDecimal esimUsagePercentage = BigDecimal.ZERO;
-                if (esimCredit.getCreditLimit() != null && esimCredit.getCreditLimit().compareTo(BigDecimal.ZERO) > 0) {
-                    BigDecimal esimUsed = esimCredit.getUsedCredit() != null ? esimCredit.getUsedCredit() : BigDecimal.ZERO;
-                    esimUsagePercentage = esimUsed
-                        .multiply(BigDecimal.valueOf(100))
-                        .divide(esimCredit.getCreditLimit(), 2, RoundingMode.HALF_UP);
-                }
-                response.put("esimCreditUsagePercentage", esimUsagePercentage.doubleValue());
-                
-                // Include eSIM transactions if available
-                if (esimCredit.getTransactions() != null && !esimCredit.getTransactions().isEmpty()) {
-                    response.put("esimTransactions", esimCredit.getTransactions());
-                }
-                
-                System.out.println("   eSIM Credit Limit: " + esimCredit.getCreditLimit());
-                System.out.println("   eSIM Used Credit: " + esimCredit.getUsedCredit());
-                System.out.println("   eSIM Available Credit: " + esimCredit.getAvailableCredit());
-            } else {
-                response.put("esimCreditLimit", 0.0);
-                response.put("esimUsedCredit", 0.0);
-                response.put("esimAvailableCredit", 0.0);
-                response.put("esimCreditUsagePercentage", 0.0);
             }
             
             return ResponseEntity.ok(response);
