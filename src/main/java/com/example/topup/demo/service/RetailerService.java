@@ -112,8 +112,14 @@ public class RetailerService {
         LocalDateTime startOfMonth = now.withDayOfMonth(1).withHour(0).withMinute(0).withSecond(0);
         LocalDateTime startOfLastMonth = startOfMonth.minusMonths(1);
         
-        // Total orders
-        long totalOrders = orderRepository.countByRetailer(retailer);
+        // Get POS sales from RetailerOrder (new system)
+        List<RetailerOrder> posSales = retailerOrderRepository.findByRetailerIdAndStatus(
+            retailer.getId(), RetailerOrder.OrderStatus.COMPLETED);
+        
+        // Total orders - count from both old Order table and new RetailerOrder (POS) table
+        long oldSystemOrders = orderRepository.countByRetailer(retailer);
+        long posSystemOrders = posSales.size();
+        long totalOrders = oldSystemOrders + posSystemOrders;
         analytics.put("totalOrders", totalOrders);
         
         // Pending orders
@@ -135,10 +141,6 @@ public class RetailerService {
         // Get old orders for customer sales count
         List<Order> soldOrders = orderRepository.findByRetailerAndStatusOrderByCreatedDateDesc(
             retailer, OrderStatus.SOLD);
-        
-        // Get POS sales from RetailerOrder (new system)
-        List<RetailerOrder> posSales = retailerOrderRepository.findByRetailerIdAndStatus(
-            retailer.getId(), RetailerOrder.OrderStatus.COMPLETED);
         
         // Add customer sales count (POS transactions from both systems)
         long customerSales = soldOrders.size() + posSales.size();

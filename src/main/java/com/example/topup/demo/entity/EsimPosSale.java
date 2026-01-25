@@ -85,6 +85,9 @@ public class EsimPosSale {
 
     private LocalDateTime emailSentAt;
 
+    // Delivery method (email or print)
+    private String deliveryMethod; // "email" or "print"
+
     // Timestamps
     @Indexed
     private LocalDateTime saleDate;
@@ -436,6 +439,14 @@ public class EsimPosSale {
         this.emailSent = true;
         this.emailSentAt = LocalDateTime.now();
         this.updatedAt = LocalDateTime.now();
+    }
+
+    public String getDeliveryMethod() {
+        return deliveryMethod;
+    }
+
+    public void setDeliveryMethod(String deliveryMethod) {
+        this.deliveryMethod = deliveryMethod;
     }
 
     // Mark sale as refunded

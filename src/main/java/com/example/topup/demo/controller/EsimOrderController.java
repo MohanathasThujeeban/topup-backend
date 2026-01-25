@@ -206,6 +206,14 @@ public class EsimOrderController {
                     orderItem.setUnitPrice(BigDecimal.valueOf(request.getAmount()));
                     orderItem.setRetailPrice(BigDecimal.valueOf(request.getAmount()));
                     
+                    // Set network provider from pool
+                    if (selectedPool.getNetworkProvider() != null && !selectedPool.getNetworkProvider().isEmpty()) {
+                        orderItem.setNetworkProvider(selectedPool.getNetworkProvider());
+                        System.out.println("   📡 OrderItem Network Provider set: " + selectedPool.getNetworkProvider());
+                    } else {
+                        System.out.println("   ⚠️ Network Provider not available in pool for OrderItem");
+                    }
+                    
                     List<RetailerOrder.OrderItem> items = new ArrayList<>();
                     items.add(orderItem);
                     retailerOrder.setItems(items);

@@ -409,9 +409,30 @@ public class StockController {
             for (StockPool.StockItem item : pool.getItems()) {
                 Map<String, Object> itemMap = new HashMap<>();
                 itemMap.put("itemId", item.getItemId());
-                // Return masked PIN number for security (show only last 4 digits)
-                itemMap.put("itemData", stockService.maskData(stockService.decryptData(item.getItemData())));
-                itemMap.put("serialNumber", item.getSerialNumber());
+
+                // Decrypt underlying data once for this item
+                String decryptedData = stockService.decryptData(item.getItemData());
+
+                // Always return masked value for display safety
+                itemMap.put("itemData", stockService.maskData(decryptedData));
+
+                // Derive serial/ICCID value
+                String serialNumber = item.getSerialNumber();
+                if (pool.getStockType() == StockPool.StockType.ESIM) {
+                    // For eSIMs, fall back to full ICCID when serialNumber is missing
+                    if (serialNumber == null || serialNumber.trim().isEmpty()) {
+                        serialNumber = decryptedData;
+                    }
+                }
+                itemMap.put("serialNumber", serialNumber);
+
+                // Derive price, falling back to pool price when item price is empty
+                String itemPrice = item.getPrice();
+                if ((itemPrice == null || itemPrice.trim().isEmpty()) &&
+                    pool.getPrice() != null && !pool.getPrice().trim().isEmpty()) {
+                    itemPrice = pool.getPrice();
+                }
+
                 itemMap.put("status", item.getStatus());
                 itemMap.put("assignedDate", item.getAssignedDate());
                 itemMap.put("assignedToOrderId", item.getAssignedToOrderId());
@@ -419,7 +440,7 @@ public class StockController {
                 itemMap.put("assignedToUserEmail", item.getAssignedToUserEmail());
                 itemMap.put("notes", item.getNotes());
                 itemMap.put("productId", item.getProductId()); // Add productId from item
-                itemMap.put("price", item.getPrice()); // Add price from item
+                itemMap.put("price", itemPrice); // Add price from item or pool
                 itemMap.put("type", item.getType()); // Add type from item
                 decryptedItems.add(itemMap);
             }
@@ -1072,6 +1093,14 @@ public class StockController {
                         item.setRetailPrice(BigDecimal.valueOf(price));
                         item.setSerialNumbers(java.util.Arrays.asList(iccid));
                         
+                        // Set network provider from pool
+                        if (pool.getNetworkProvider() != null && !pool.getNetworkProvider().isEmpty()) {
+                            item.setNetworkProvider(pool.getNetworkProvider());
+                            System.out.println("   📡 OrderItem Network Provider set: " + pool.getNetworkProvider());
+                        } else {
+                            System.out.println("   ⚠️ Network Provider not available in pool for OrderItem");
+                        }
+                        
                         order.addItem(item);
                         order.setTotalAmount(BigDecimal.valueOf(price));
                         order.setCurrency("NOK");
@@ -1125,6 +1154,7 @@ public class StockController {
                             posSale.setOrderReference(order.getOrderNumber());
                             posSale.setStatus(EsimPosSale.SaleStatus.COMPLETED);
                             posSale.setEmailSent(!skipEmail); // Only mark as sent if email was actually sent
+                            posSale.setDeliveryMethod(skipEmail ? "print" : "email"); // Set delivery method based on skipEmail flag
                             posSale.setCreatedBy(retailerEmail);
                             
                             // Set cost price if available
@@ -1143,8 +1173,11 @@ public class StockController {
                             posSale.setBundleId(poolId);
                             
                             // Set operator from networkProvider if available
-                            if (pool.getNetworkProvider() != null) {
+                            if (pool.getNetworkProvider() != null && !pool.getNetworkProvider().isEmpty()) {
                                 posSale.setOperator(pool.getNetworkProvider());
+                                System.out.println("   📡 Network Provider set: " + pool.getNetworkProvider());
+                            } else {
+                                System.out.println("   ⚠️ Network Provider not set in pool");
                             }
                             
                             savedPosSale = esimPosSaleRepository.save(posSale);
@@ -1153,6 +1186,7 @@ public class StockController {
                             System.out.println("   📊 ICCID: " + iccid);
                             System.out.println("   📊 Sale Price: NOK " + savedPosSale.getSalePrice());
                             System.out.println("   📊 Retailer: " + retailerEmail);
+                            System.out.println("   📊 Operator: " + savedPosSale.getOperator());
                         } catch (Exception posSaleEx) {
                             System.err.println("⚠️ Error saving to esim_pos_sales collection: " + posSaleEx.getMessage());
                             posSaleEx.printStackTrace();

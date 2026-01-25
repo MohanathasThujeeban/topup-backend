@@ -358,6 +358,21 @@ public class RetailerPurchaseService {
         orderItem.setUnitPrice(unitPrice);
         orderItem.setRetailPrice(unitPrice);
         
+        // Set network provider from stock pool or product
+        String networkProvider = null;
+        if (isFromStockPool && stockPool != null && stockPool.getNetworkProvider() != null) {
+            networkProvider = stockPool.getNetworkProvider();
+        } else if (product.getMetadata() != null && product.getMetadata().containsKey("networkProvider")) {
+            networkProvider = product.getMetadata().get("networkProvider");
+        }
+        
+        if (networkProvider != null && !networkProvider.isEmpty()) {
+            orderItem.setNetworkProvider(networkProvider);
+            System.out.println("   📡 OrderItem Network Provider set: " + networkProvider);
+        } else {
+            System.out.println("   ⚠️ Network Provider not available for OrderItem");
+        }
+        
         List<RetailerOrder.OrderItem> items = new ArrayList<>();
         items.add(orderItem);
         retailerOrder.setItems(items);

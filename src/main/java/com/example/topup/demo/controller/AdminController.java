@@ -2,7 +2,13 @@ package com.example.topup.demo.controller;
 
 import com.example.topup.demo.service.AdminService;
 import com.example.topup.demo.entity.User;
+import com.example.topup.demo.entity.EsimPosSale;
+import com.example.topup.demo.entity.StockPool;
+import com.example.topup.demo.entity.Product;
 import com.example.topup.demo.repository.UserRepository;
+import com.example.topup.demo.repository.EsimPosSaleRepository;
+import com.example.topup.demo.repository.StockPoolRepository;
+import com.example.topup.demo.repository.ProductRepository;
 import com.example.topup.demo.dto.RetailerCreditLimitDTO;
 import com.example.topup.demo.dto.UpdateCreditLimitRequest;
 import com.example.topup.demo.dto.UpdateUnitLimitRequest;
@@ -33,6 +39,15 @@ public class AdminController {
 
     @Autowired
     private UserRepository userRepository;
+    
+    @Autowired
+    private EsimPosSaleRepository esimPosSaleRepository;
+    
+    @Autowired
+    private StockPoolRepository stockPoolRepository;
+    
+    @Autowired
+    private ProductRepository productRepository;
 
     /**
      * Test endpoint to verify admin controller is working
@@ -707,33 +722,37 @@ public class AdminController {
     /**
      * Get eSIM sales analytics
      * Includes total eSIMs sold, total earnings, and sales history with details
+     * Can filter by productType: 'ESIM', 'EPIN', or 'ALL'
+     * Can filter by networkProvider: e.g., 'Lycamobile', 'Telenor', etc.
      */
     @GetMapping("/analytics/esim-sales")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Map<String, Object>> getEsimSalesAnalytics(
             @RequestParam(required = false) String startDate,
             @RequestParam(required = false) String endDate,
-            @RequestParam(required = false) String retailerId) {
+            @RequestParam(required = false) String retailerId,
+            @RequestParam(required = false) String productType,
+            @RequestParam(required = false) String networkProvider) {
         try {
-            Map<String, Object> esimAnalytics = adminService.getEsimSalesAnalytics(startDate, endDate, retailerId);
+            Map<String, Object> esimAnalytics = adminService.getEsimSalesAnalytics(startDate, endDate, retailerId, productType, networkProvider);
             
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
             response.put("data", esimAnalytics);
-            response.put("message", "eSIM sales analytics fetched successfully");
+            response.put("message", "Sales analytics fetched successfully");
             
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            // Return empty eSIM analytics instead of error
-            Map<String, Object> emptyEsimAnalytics = new HashMap<>();
-            emptyEsimAnalytics.put("totalEsimsSold", 0);
-            emptyEsimAnalytics.put("totalEarnings", 0);
-            emptyEsimAnalytics.put("salesHistory", new ArrayList<>());
+            // Return empty analytics instead of error
+            Map<String, Object> emptyAnalytics = new HashMap<>();
+            emptyAnalytics.put("totalEsimsSold", 0);
+            emptyAnalytics.put("totalEarnings", 0);
+            emptyAnalytics.put("salesHistory", new ArrayList<>());
             
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
-            response.put("data", emptyEsimAnalytics);
-            response.put("message", "eSIM sales analytics fetched successfully");
+            response.put("data", emptyAnalytics);
+            response.put("message", "Sales analytics fetched successfully");
             response.put("error", "Database connection error");
             
             return ResponseEntity.ok(response);
@@ -751,9 +770,10 @@ public class AdminController {
             @RequestParam(required = false) String startDate,
             @RequestParam(required = false) String endDate,
             @RequestParam(required = false) String retailerId,
-            @RequestParam(required = false) String productType) {
+            @RequestParam(required = false) String productType,
+            @RequestParam(required = false) String networkProvider) {
         try {
-            Map<String, Object> salesHistory = adminService.getEsimSalesHistory(page, size, startDate, endDate, retailerId, productType);
+            Map<String, Object> salesHistory = adminService.getEsimSalesHistory(page, size, startDate, endDate, retailerId, productType, networkProvider);
             
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
@@ -933,6 +953,117 @@ public class AdminController {
             response.put("success", false);
             response.put("error", e.getMessage());
             return ResponseEntity.badRequest().body(response);
+        }
+    }
+    
+    /**
+     * Fix existing EsimPosSale records to populate network provider (operator) field
+     */
+    @PostMapping("/fix-esim-network-providers")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Map<String, Object>> fixEsimNetworkProviders() {
+        try {
+            System.out.println("=== Fixing eSIM Network Providers ===");
+            
+            // Get all EsimPosSale records
+            List<EsimPosSale> allPosSales = esimPosSaleRepository.findAll();
+            
+            int totalRecords = allPosSales.size();
+            int recordsUpdated = 0;
+            int recordsSkipped = 0;
+            int recordsNotFound = 0;
+            
+            for (EsimPosSale posSale : allPosSales) {
+                // Skip if operator is already set
+                if (posSale.getOperator() != null && !posSale.getOperator().isEmpty() && !"N/A".equals(posSale.getOperator())) {
+                    recordsSkipped++;
+                    continue;
+                }
+                
+                String networkProvider = null;
+                
+                try {
+                    // Try to get from StockPool using stockPoolId
+                    if (posSale.getStockPoolId() != null) {
+                        Optional<StockPool> poolOpt = stockPoolRepository.findById(posSale.getStockPoolId());
+                        if (poolOpt.isPresent()) {
+                            StockPool pool = poolOpt.get();
+                            if (pool.getNetworkProvider() != null && !pool.getNetworkProvider().isEmpty()) {
+                                networkProvider = pool.getNetworkProvider();
+                                System.out.println("  ✓ Found network provider from StockPool (by ID): " + networkProvider + " for sale " + posSale.getId());
+                            }
+                        }
+                    }
+                    
+                    // Fallback: Try from StockPool by productId
+                    if (networkProvider == null && posSale.getProductId() != null) {
+                        List<StockPool> stockPools = stockPoolRepository.findByProductId(posSale.getProductId());
+                        if (stockPools != null && !stockPools.isEmpty()) {
+                            for (StockPool pool : stockPools) {
+                                if (pool.getNetworkProvider() != null && !pool.getNetworkProvider().isEmpty()) {
+                                    networkProvider = pool.getNetworkProvider();
+                                    System.out.println("  ✓ Found network provider from StockPool (by product ID): " + networkProvider + " for sale " + posSale.getId());
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Last resort: Try from Product metadata
+                    if (networkProvider == null && posSale.getProductId() != null) {
+                        Optional<Product> productOpt = productRepository.findById(posSale.getProductId());
+                        if (productOpt.isPresent()) {
+                            Product product = productOpt.get();
+                            if (product.getMetadata() != null && product.getMetadata().get("operator") != null) {
+                                networkProvider = product.getMetadata().get("operator");
+                                System.out.println("  ✓ Found network provider from Product metadata: " + networkProvider + " for sale " + posSale.getId());
+                            } else if (product.getSupportedNetworks() != null && !product.getSupportedNetworks().isEmpty()) {
+                                networkProvider = String.join(", ", product.getSupportedNetworks());
+                                System.out.println("  ✓ Found network provider from Product supportedNetworks: " + networkProvider + " for sale " + posSale.getId());
+                            }
+                        }
+                    }
+                    
+                    // Update if found
+                    if (networkProvider != null && !networkProvider.isEmpty()) {
+                        posSale.setOperator(networkProvider);
+                        esimPosSaleRepository.save(posSale);
+                        recordsUpdated++;
+                        System.out.println("  ✅ Updated sale " + posSale.getId() + " with operator: " + networkProvider);
+                    } else {
+                        recordsNotFound++;
+                        System.out.println("  ⚠️ Could not find network provider for sale " + posSale.getId());
+                    }
+                    
+                } catch (Exception e) {
+                    System.err.println("  ❌ Error processing sale " + posSale.getId() + ": " + e.getMessage());
+                }
+            }
+            
+            System.out.println("=== Fix Complete ===");
+            System.out.println("Total records: " + totalRecords);
+            System.out.println("Records updated: " + recordsUpdated);
+            System.out.println("Records skipped (already set): " + recordsSkipped);
+            System.out.println("Records not found: " + recordsNotFound);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", "Network providers fixed successfully");
+            response.put("totalRecords", totalRecords);
+            response.put("recordsUpdated", recordsUpdated);
+            response.put("recordsSkipped", recordsSkipped);
+            response.put("recordsNotFound", recordsNotFound);
+            
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error fixing network providers: " + e.getMessage());
+            e.printStackTrace();
+            
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", "Error fixing network providers: " + e.getMessage());
+            return ResponseEntity.status(500).body(error);
         }
     }
 }

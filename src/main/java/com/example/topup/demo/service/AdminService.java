@@ -6,8 +6,10 @@ import com.example.topup.demo.entity.Order;
 import com.example.topup.demo.entity.RetailerOrder;
 import com.example.topup.demo.entity.RetailerLimit;
 import com.example.topup.demo.entity.EsimOrderRequest;
+import com.example.topup.demo.entity.EsimPosSale;
 import com.example.topup.demo.entity.StockPool;
 import com.example.topup.demo.entity.RetailerKickbackLimit;
+import com.example.topup.demo.entity.Product;
 import com.example.topup.demo.dto.RetailerCreditLimitDTO;
 import com.example.topup.demo.dto.UpdateCreditLimitRequest;
 import com.example.topup.demo.dto.UpdateUnitLimitRequest;
@@ -19,8 +21,12 @@ import com.example.topup.demo.repository.OrderRepository;
 import com.example.topup.demo.repository.RetailerOrderRepository;
 import com.example.topup.demo.repository.RetailerLimitRepository;
 import com.example.topup.demo.repository.EsimOrderRequestRepository;
+import com.example.topup.demo.repository.EsimPosSaleRepository;
 import com.example.topup.demo.repository.StockPoolRepository;
 import com.example.topup.demo.repository.RetailerKickbackLimitRepository;
+import com.example.topup.demo.repository.ProductRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -35,6 +41,8 @@ import java.util.stream.Collectors;
 
 @Service
 public class AdminService {
+
+    private static final Logger log = LoggerFactory.getLogger(AdminService.class);
 
     @Autowired
     private UserRepository userRepository;
@@ -61,7 +69,16 @@ public class AdminService {
     private RetailerKickbackLimitRepository retailerKickbackLimitRepository;
 
     @Autowired
+    private EsimPosSaleRepository esimPosSaleRepository;
+
+    @Autowired
     private EmailService emailService;
+
+    @Autowired
+    private StockService stockService;
+
+    @Autowired
+    private ProductRepository productRepository;
 
     /**
      * Get dashboard analytics data
@@ -145,41 +162,47 @@ public class AdminService {
      * Get all users with pagination and filtering
      */
     public Map<String, Object> getAllUsers(int page, int size, String accountType, String accountStatus, String search) {
-        Pageable pageable = PageRequest.of(page, size, Sort.by("createdDate").descending());
-        Page<User> usersPage;
-        
-        if (search != null && !search.trim().isEmpty()) {
-            // Search by name or email
-            usersPage = userRepository.findByFirstNameContainingIgnoreCaseOrLastNameContainingIgnoreCaseOrEmailContainingIgnoreCase(
-                search, search, search, pageable);
-        } else if (accountType != null || accountStatus != null) {
-            // Filter by account type and/or status
-            User.AccountType type = accountType != null ? User.AccountType.valueOf(accountType.toUpperCase()) : null;
-            User.AccountStatus status = accountStatus != null ? User.AccountStatus.valueOf(accountStatus.toUpperCase()) : null;
+        try {
+            Pageable pageable = PageRequest.of(page, size, Sort.by("createdDate").descending());
+            Page<User> usersPage;
             
-            if (type != null && status != null) {
-                usersPage = userRepository.findByAccountTypeAndAccountStatus(type, status, pageable);
-            } else if (type != null) {
-                usersPage = userRepository.findByAccountType(type, pageable);
+            if (search != null && !search.trim().isEmpty()) {
+                // Search by name or email
+                usersPage = userRepository.findByFirstNameContainingIgnoreCaseOrLastNameContainingIgnoreCaseOrEmailContainingIgnoreCase(
+                    search, search, search, pageable);
+            } else if (accountType != null || accountStatus != null) {
+                // Filter by account type and/or status
+                User.AccountType type = accountType != null ? User.AccountType.valueOf(accountType.toUpperCase()) : null;
+                User.AccountStatus status = accountStatus != null ? User.AccountStatus.valueOf(accountStatus.toUpperCase()) : null;
+                
+                if (type != null && status != null) {
+                    usersPage = userRepository.findByAccountTypeAndAccountStatus(type, status, pageable);
+                } else if (type != null) {
+                    usersPage = userRepository.findByAccountType(type, pageable);
+                } else {
+                    usersPage = userRepository.findByAccountStatus(status, pageable);
+                }
             } else {
-                usersPage = userRepository.findByAccountStatus(status, pageable);
+                usersPage = userRepository.findAll(pageable);
             }
-        } else {
-            usersPage = userRepository.findAll(pageable);
+            
+            List<Map<String, Object>> users = usersPage.getContent().stream()
+                .filter(user -> user != null)
+                .map(this::convertUserToMap)
+                .collect(Collectors.toList());
+            
+            Map<String, Object> result = new HashMap<>();
+            result.put("users", users);
+            result.put("totalElements", usersPage.getTotalElements());
+            result.put("totalPages", usersPage.getTotalPages());
+            result.put("currentPage", page);
+            result.put("size", size);
+            
+            return result;
+        } catch (Exception e) {
+            log.error("Error in getAllUsers: ", e);
+            throw new RuntimeException("Failed to fetch users: " + e.getMessage(), e);
         }
-        
-        List<Map<String, Object>> users = usersPage.getContent().stream()
-            .map(this::convertUserToMap)
-            .collect(Collectors.toList());
-        
-        Map<String, Object> result = new HashMap<>();
-        result.put("users", users);
-        result.put("totalElements", usersPage.getTotalElements());
-        result.put("totalPages", usersPage.getTotalPages());
-        result.put("currentPage", page);
-        result.put("size", size);
-        
-        return result;
     }
 
     /**
@@ -460,12 +483,12 @@ public class AdminService {
     private Map<String, Object> convertUserToMap(User user) {
         Map<String, Object> userMap = new HashMap<>();
         userMap.put("id", user.getId());
-        userMap.put("firstName", user.getFirstName());
-        userMap.put("lastName", user.getLastName());
-        userMap.put("email", user.getEmail());
-        userMap.put("mobileNumber", user.getMobileNumber());
-        userMap.put("accountType", user.getAccountType().name());
-        userMap.put("accountStatus", user.getAccountStatus().name());
+        userMap.put("firstName", user.getFirstName() != null ? user.getFirstName() : "");
+        userMap.put("lastName", user.getLastName() != null ? user.getLastName() : "");
+        userMap.put("email", user.getEmail() != null ? user.getEmail() : "");
+        userMap.put("mobileNumber", user.getMobileNumber() != null ? user.getMobileNumber() : "");
+        userMap.put("accountType", user.getAccountType() != null ? user.getAccountType().name() : "PERSONAL");
+        userMap.put("accountStatus", user.getAccountStatus() != null ? user.getAccountStatus().name() : "PENDING");
         userMap.put("emailVerified", user.isEmailVerified());
         userMap.put("createdDate", user.getCreatedDate());
         userMap.put("lastModifiedDate", user.getLastModifiedDate());
@@ -495,16 +518,32 @@ public class AdminService {
     private double calculateTotalRevenue() {
         try {
             // Calculate revenue from customer orders (Order entity)
+            // Include COMPLETED, SOLD, DEPLETED orders as they represent confirmed revenue
             List<Order> allOrders = orderRepository.findAll();
             double customerRevenue = allOrders.stream()
-                .filter(order -> order.getStatus() == Order.OrderStatus.COMPLETED)
+                .filter(order -> {
+                    Order.OrderStatus status = order.getStatus();
+                    Order.PaymentStatus paymentStatus = order.getPaymentStatus();
+                    // Count orders that are completed/sold/depleted OR have successful payment
+                    return (status == Order.OrderStatus.COMPLETED || 
+                            status == Order.OrderStatus.SOLD || 
+                            status == Order.OrderStatus.DEPLETED ||
+                            paymentStatus == Order.PaymentStatus.PAID);
+                })
                 .mapToDouble(order -> order.getAmount() != null ? order.getAmount().doubleValue() : 0.0)
                 .sum();
             
             // Calculate revenue from retailer orders (RetailerOrder entity)
+            // Include DELIVERED, COMPLETED, and orders with successful payment
             List<RetailerOrder> allRetailerOrders = retailerOrderRepository.findAll();
             double retailerRevenue = allRetailerOrders.stream()
-                .filter(order -> order.getStatus() == RetailerOrder.OrderStatus.DELIVERED)
+                .filter(order -> {
+                    RetailerOrder.OrderStatus status = order.getStatus();
+                    RetailerOrder.PaymentStatus paymentStatus = order.getPaymentStatus();
+                    return (status == RetailerOrder.OrderStatus.DELIVERED || 
+                            status == RetailerOrder.OrderStatus.COMPLETED ||
+                            paymentStatus == RetailerOrder.PaymentStatus.COMPLETED);
+                })
                 .mapToDouble(order -> order.getTotalAmount() != null ? order.getTotalAmount().doubleValue() : 0.0)
                 .sum();
             
@@ -518,6 +557,7 @@ public class AdminService {
             return customerRevenue + retailerRevenue + esimRevenue;
         } catch (Exception e) {
             System.err.println("Error calculating total revenue: " + e.getMessage());
+            e.printStackTrace();
             return 0.0;
         }
     }
@@ -530,14 +570,27 @@ public class AdminService {
             // Customer orders for this month
             List<Order> monthlyOrders = orderRepository.findByCreatedDateBetween(startOfMonth, endOfMonth);
             double customerRevenue = monthlyOrders.stream()
-                .filter(order -> order.getStatus() == Order.OrderStatus.COMPLETED)
+                .filter(order -> {
+                    Order.OrderStatus status = order.getStatus();
+                    Order.PaymentStatus paymentStatus = order.getPaymentStatus();
+                    return (status == Order.OrderStatus.COMPLETED || 
+                            status == Order.OrderStatus.SOLD || 
+                            status == Order.OrderStatus.DEPLETED ||
+                            paymentStatus == Order.PaymentStatus.PAID);
+                })
                 .mapToDouble(order -> order.getAmount() != null ? order.getAmount().doubleValue() : 0.0)
                 .sum();
             
             // Retailer orders for this month
             List<RetailerOrder> monthlyRetailerOrders = retailerOrderRepository.findByCreatedDateBetween(startOfMonth, endOfMonth);
             double retailerRevenue = monthlyRetailerOrders.stream()
-                .filter(order -> order.getStatus() == RetailerOrder.OrderStatus.DELIVERED)
+                .filter(order -> {
+                    RetailerOrder.OrderStatus status = order.getStatus();
+                    RetailerOrder.PaymentStatus paymentStatus = order.getPaymentStatus();
+                    return (status == RetailerOrder.OrderStatus.DELIVERED || 
+                            status == RetailerOrder.OrderStatus.COMPLETED ||
+                            paymentStatus == RetailerOrder.PaymentStatus.COMPLETED);
+                })
                 .mapToDouble(order -> order.getTotalAmount() != null ? order.getTotalAmount().doubleValue() : 0.0)
                 .sum();
             
@@ -551,6 +604,7 @@ public class AdminService {
             return customerRevenue + retailerRevenue + esimRevenue;
         } catch (Exception e) {
             System.err.println("Error calculating monthly revenue: " + e.getMessage());
+            e.printStackTrace();
             return 0.0;
         }
     }
@@ -563,14 +617,27 @@ public class AdminService {
             // Customer orders for today
             List<Order> todayOrders = orderRepository.findByCreatedDateBetween(startOfDay, endOfDay);
             double customerRevenue = todayOrders.stream()
-                .filter(order -> order.getStatus() == Order.OrderStatus.COMPLETED)
+                .filter(order -> {
+                    Order.OrderStatus status = order.getStatus();
+                    Order.PaymentStatus paymentStatus = order.getPaymentStatus();
+                    return (status == Order.OrderStatus.COMPLETED || 
+                            status == Order.OrderStatus.SOLD || 
+                            status == Order.OrderStatus.DEPLETED ||
+                            paymentStatus == Order.PaymentStatus.PAID);
+                })
                 .mapToDouble(order -> order.getAmount() != null ? order.getAmount().doubleValue() : 0.0)
                 .sum();
             
             // Retailer orders for today
             List<RetailerOrder> todayRetailerOrders = retailerOrderRepository.findByCreatedDateBetween(startOfDay, endOfDay);
             double retailerRevenue = todayRetailerOrders.stream()
-                .filter(order -> order.getStatus() == RetailerOrder.OrderStatus.DELIVERED)
+                .filter(order -> {
+                    RetailerOrder.OrderStatus status = order.getStatus();
+                    RetailerOrder.PaymentStatus paymentStatus = order.getPaymentStatus();
+                    return (status == RetailerOrder.OrderStatus.DELIVERED || 
+                            status == RetailerOrder.OrderStatus.COMPLETED ||
+                            paymentStatus == RetailerOrder.PaymentStatus.COMPLETED);
+                })
                 .mapToDouble(order -> order.getTotalAmount() != null ? order.getTotalAmount().doubleValue() : 0.0)
                 .sum();
             
@@ -1652,11 +1719,33 @@ public class AdminService {
                         
                         // First check if serial numbers are already stored in the OrderItem
                         List<String> serialNumbers = new ArrayList<>();
+                        Set<String> encryptedPinsSet = new HashSet<>(); // Use Set to avoid duplicates
+                        
                         if (item.getSerialNumbers() != null && !item.getSerialNumbers().isEmpty()) {
                             // Use serial numbers from the order item (POS sales)
                             serialNumbers = item.getSerialNumbers();
+                            
+                            // Fetch the actual encrypted PINs from StockPool using serial numbers
+                            try {
+                                List<StockPool> stockPools = stockPoolRepository.findByProductId(item.getProductId());
+                                for (StockPool pool : stockPools) {
+                                    if (pool.getStockType() == stockType && pool.getItems() != null) {
+                                        for (StockPool.StockItem stockItem : pool.getItems()) {
+                                            if (serialNumbers.contains(stockItem.getSerialNumber())) {
+                                                // Get the actual PIN data (itemData field)
+                                                String pinData = stockItem.getItemData();
+                                                if (pinData != null && !pinData.isEmpty()) {
+                                                    encryptedPinsSet.add(pinData); // Add to Set to ensure uniqueness
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch (Exception e) {
+                                System.err.println("Error fetching PIN data for serials: " + e.getMessage());
+                            }
                         } else {
-                            // Fallback: Fetch serial numbers from StockPool (for older orders)
+                            // Fallback: Fetch serial numbers and PINs from StockPool (for older orders)
                             try {
                                 // Find stock pool for this product
                                 List<StockPool> stockPools = stockPoolRepository.findByProductId(item.getProductId());
@@ -1669,8 +1758,13 @@ public class AdminService {
                                             if (assignedTo != null && 
                                                 (assignedTo.equals(order.getId()) || assignedTo.equals(order.getOrderNumber()))) {
                                                 String serial = stockItem.getSerialNumber();
+                                                String pinData = stockItem.getItemData();
+                                                
                                                 if (serial != null && !serial.isEmpty()) {
                                                     serialNumbers.add(serial);
+                                                }
+                                                if (pinData != null && !pinData.isEmpty()) {
+                                                    encryptedPinsSet.add(pinData); // Add to Set to ensure uniqueness
                                                 }
                                             }
                                         }
@@ -1681,14 +1775,71 @@ public class AdminService {
                             }
                         }
                         
+                        // Convert Set to List for processing
+                        List<String> encryptedPins = new ArrayList<>(encryptedPinsSet);
+                        
                         // Add serial numbers to item data
                         if (!serialNumbers.isEmpty()) {
+                            // Always show serial numbers as-is (they're just identifiers)
                             itemData.put("serialNumbers", serialNumbers);
                             itemData.put("serialNumber", String.join(", ", serialNumbers));
+                            
+                            // For ePIN items, add decrypted PINs in a separate field (visible for 24 hours only)
+                            if (type.equals("ePIN")) {
+                                LocalDateTime orderDate = order.getCreatedDate();
+                                LocalDateTime now = LocalDateTime.now();
+                                LocalDateTime twentyFourHoursAgo = now.minusHours(24);
+                                
+                                // Show decrypted PIN only if order is within last 24 hours
+                                boolean showDecrypted = orderDate.isAfter(twentyFourHoursAgo);
+                                
+                                if (showDecrypted && !encryptedPins.isEmpty()) {
+                                    // Decrypt and show the actual PINs (unique only)
+                                    List<String> decryptedPins = new ArrayList<>();
+                                    for (String encryptedPin : encryptedPins) {
+                                        try {
+                                            String decrypted = stockService.decryptData(encryptedPin);
+                                            decryptedPins.add(decrypted);
+                                        } catch (Exception e) {
+                                            // If decryption fails, show as-is (might be already decrypted)
+                                            decryptedPins.add(encryptedPin);
+                                        }
+                                    }
+                                    itemData.put("pins", decryptedPins);
+                                    itemData.put("pin", String.join(", ", decryptedPins));
+                                    itemData.put("pinVisible", true);
+                                } else {
+                                    // Hide PINs after 24 hours
+                                    itemData.put("pins", new ArrayList<>());
+                                    itemData.put("pin", "Hidden (24h expired)");
+                                    itemData.put("pinVisible", false);
+                                }
+                            } else {
+                                // For eSIM, no PIN field needed
+                                itemData.put("pinVisible", false);
+                            }
                         } else {
                             itemData.put("serialNumbers", new ArrayList<>());
                             itemData.put("serialNumber", "Not assigned yet");
                         }
+                        
+                        // Fetch network provider from StockPool
+                        String networkProvider = "N/A";
+                        try {
+                            // Find stock pool for this product
+                            List<StockPool> stockPools = stockPoolRepository.findByProductId(item.getProductId());
+                            if (stockPools != null && !stockPools.isEmpty()) {
+                                for (StockPool pool : stockPools) {
+                                    if (pool.getStockType() == stockType && pool.getNetworkProvider() != null && !pool.getNetworkProvider().isEmpty()) {
+                                        networkProvider = pool.getNetworkProvider();
+                                        break;
+                                    }
+                                }
+                            }
+                        } catch (Exception e) {
+                            System.err.println("Error fetching network provider from stock pool: " + e.getMessage());
+                        }
+                        itemData.put("networkProvider", networkProvider);
                         
                         itemsList.add(itemData);
                     }
@@ -1763,8 +1914,10 @@ public class AdminService {
     /**
      * Get eSIM sales analytics
      * Returns total eSIMs sold, total earnings, and summary statistics
+     * Can filter by product type: 'ESIM', 'EPIN', or null for all
+     * Can filter by network provider
      */
-    public Map<String, Object> getEsimSalesAnalytics(String startDate, String endDate, String retailerId) {
+    public Map<String, Object> getEsimSalesAnalytics(String startDate, String endDate, String retailerId, String productType, String networkProvider) {
         Map<String, Object> analytics = new HashMap<>();
         
         try {
@@ -1801,7 +1954,7 @@ public class AdminService {
                                order.getStatus() == RetailerOrder.OrderStatus.DELIVERED)
                 .collect(Collectors.toList());
             
-            // Calculate eSIM specific analytics
+            // Calculate analytics based on product type filter
             long totalEsimsSold = 0;
             BigDecimal totalEsimEarnings = BigDecimal.ZERO;
             Map<String, Integer> esimProductSales = new HashMap<>();
@@ -1811,9 +1964,23 @@ public class AdminService {
                 for (RetailerOrder.OrderItem item : order.getItems()) {
                     String cat = item.getCategory() != null ? item.getCategory() : "";
                     String type = item.getProductType() != null ? item.getProductType() : "";
+                    String provider = item.getNetworkProvider() != null ? item.getNetworkProvider() : "";
                     
-                    // Check if it's an eSIM product
-                    if (cat.toLowerCase().contains("esim") || type.toLowerCase().contains("esim")) {
+                    // Check product type filter
+                    boolean isEsim = cat.toLowerCase().contains("esim") || type.toLowerCase().contains("esim");
+                    boolean isEpin = !isEsim; // If not eSIM, consider it ePIN
+                    
+                    // Apply product type filter
+                    boolean includeItem = productType == null || productType.isEmpty() || productType.equalsIgnoreCase("ALL") ||
+                                         (productType.equalsIgnoreCase("ESIM") && isEsim) ||
+                                         (productType.equalsIgnoreCase("EPIN") && isEpin);
+                    
+                    // Apply network provider filter
+                    if (networkProvider != null && !networkProvider.isEmpty() && !networkProvider.equalsIgnoreCase("ALL")) {
+                        includeItem = includeItem && provider.equalsIgnoreCase(networkProvider);
+                    }
+                    
+                    if (includeItem) {
                         int quantity = item.getQuantity();
                         BigDecimal itemTotal = item.getUnitPrice().multiply(BigDecimal.valueOf(quantity));
                         
@@ -1894,7 +2061,7 @@ public class AdminService {
             analytics.put("ordersWithEsim", ordersWithEsim);
             analytics.put("topProducts", topProducts);
             analytics.put("dailyTrend", dailyTrend);
-            analytics.put("averageOrderValue", ordersWithEsim > 0 ? totalEsimEarnings.divide(BigDecimal.valueOf(ordersWithEsim), 2, BigDecimal.ROUND_HALF_UP) : BigDecimal.ZERO);
+            analytics.put("averageOrderValue", ordersWithEsim > 0 ? totalEsimEarnings.divide(BigDecimal.valueOf(ordersWithEsim), 2, java.math.RoundingMode.HALF_UP) : BigDecimal.ZERO);
             
         } catch (Exception e) {
             throw new RuntimeException("Error calculating eSIM analytics: " + e.getMessage());
@@ -1906,7 +2073,7 @@ public class AdminService {
     /**
      * Get detailed eSIM sales history with pagination
      */
-    public Map<String, Object> getEsimSalesHistory(int page, int size, String startDate, String endDate, String retailerId, String productType) {
+    public Map<String, Object> getEsimSalesHistory(int page, int size, String startDate, String endDate, String retailerId, String productType, String networkProvider) {
         Map<String, Object> result = new HashMap<>();
         
         try {
@@ -1962,19 +2129,32 @@ public class AdminService {
                     
                     // Check if it's an eSIM product
                     boolean isEsim = cat.toLowerCase().contains("esim") || type.toLowerCase().contains("esim");
+                    boolean isEpin = !isEsim; // If not eSIM, consider it ePIN
                     
-                    // Apply product type filter if specified
-                    if (productType != null && !productType.isEmpty() && !isEsim) {
+                    // Apply product type filter
+                    boolean includeItem = productType == null || productType.isEmpty() || productType.equalsIgnoreCase("ALL") ||
+                                         (productType.equalsIgnoreCase("ESIM") && isEsim) ||
+                                         (productType.equalsIgnoreCase("EPIN") && isEpin);
+                    
+                    if (!includeItem) {
                         continue;
                     }
                     
-                    if (isEsim) {
-                        Map<String, Object> saleRecord = new HashMap<>();
-                        saleRecord.put("orderId", order.getId());
-                        saleRecord.put("orderNumber", order.getOrderNumber());
-                        saleRecord.put("orderDate", order.getCreatedDate());
-                        saleRecord.put("orderStatus", order.getStatus().name());
-                        saleRecord.put("paymentStatus", order.getPaymentStatus().name());
+                    // Apply network provider filter
+                    if (networkProvider != null && !networkProvider.isEmpty() && !networkProvider.equalsIgnoreCase("ALL")) {
+                        String itemProvider = item.getNetworkProvider();
+                        if (itemProvider == null || !itemProvider.equalsIgnoreCase(networkProvider)) {
+                            continue;
+                        }
+                    }
+                    
+                    // Create sale record for both eSIM and ePIN
+                    Map<String, Object> saleRecord = new HashMap<>();
+                    saleRecord.put("orderId", order.getId());
+                    saleRecord.put("orderNumber", order.getOrderNumber());
+                    saleRecord.put("orderDate", order.getCreatedDate());
+                    saleRecord.put("orderStatus", order.getStatus().name());
+                    saleRecord.put("paymentStatus", order.getPaymentStatus().name());
                         
                         // Retailer info
                         saleRecord.put("retailerId", order.getRetailerId());
@@ -1988,6 +2168,41 @@ public class AdminService {
                         saleRecord.put("category", item.getCategory());
                         saleRecord.put("dataAmount", item.getDataAmount());
                         saleRecord.put("validity", item.getValidity());
+                        
+                        // Get network provider from item first, then fallback to StockPool or Product
+                        String itemNetworkProvider = item.getNetworkProvider();
+                        if (itemNetworkProvider == null || itemNetworkProvider.isEmpty()) {
+                            try {
+                                // Try to get from StockPool by productId
+                                List<StockPool> stockPools = stockPoolRepository.findByProductId(item.getProductId());
+                                if (stockPools != null && !stockPools.isEmpty()) {
+                                    for (StockPool pool : stockPools) {
+                                        if (pool.getNetworkProvider() != null && !pool.getNetworkProvider().isEmpty()) {
+                                            itemNetworkProvider = pool.getNetworkProvider();
+                                            break;
+                                        }
+                                    }
+                                }
+                                
+                                // Last resort: Try from Product
+                                if (itemNetworkProvider == null || itemNetworkProvider.isEmpty()) {
+                                    Optional<Product> productOpt = productRepository.findById(item.getProductId());
+                                    if (productOpt.isPresent()) {
+                                        Product product = productOpt.get();
+                                        if (product.getMetadata() != null && product.getMetadata().get("operator") != null) {
+                                            itemNetworkProvider = product.getMetadata().get("operator");
+                                        } else if (product.getSupportedNetworks() != null && !product.getSupportedNetworks().isEmpty()) {
+                                            itemNetworkProvider = String.join(", ", product.getSupportedNetworks());
+                                        }
+                                    }
+                                }
+                            } catch (Exception e) {
+                                System.err.println("Error fetching network provider for order item: " + e.getMessage());
+                            }
+                        }
+                        
+                        // Set to empty string instead of "N/A" - frontend will handle display
+                        saleRecord.put("networkProvider", itemNetworkProvider != null && !itemNetworkProvider.isEmpty() ? itemNetworkProvider : "");
                         
                         // Quantities and pricing
                         saleRecord.put("quantity", item.getQuantity());
@@ -2003,7 +2218,6 @@ public class AdminService {
                         }
                         
                         salesHistory.add(saleRecord);
-                    }
                 }
             }
             
@@ -2053,7 +2267,7 @@ public class AdminService {
      * Includes ICCID (serial), customer name/email, order date, order id,
      * total earnings through POINT_OF_SALE eSIM sales and total eSIM count.
      */
-    public Map<String, Object> getRetailerEsimSalesReport(String retailerId, String startDate, String endDate) {
+    public Map<String, Object> getRetailerEsimSalesReport(String retailerId, String startDate, String endDate, String productType) {
         Map<String, Object> report = new HashMap<>();
 
         System.out.println("=== eSIM Sales Report Debug ===");
@@ -2082,149 +2296,146 @@ public class AdminService {
                 }
             }
 
-            List<RetailerOrder> allOrders;
+            // Fetch ONLY POS sales (EsimPosSale) - this is eSIM POS Sales report
+            List<EsimPosSale> posSales;
             if (start != null && end != null) {
-                allOrders = retailerOrderRepository.findByRetailerIdAndCreatedDateBetween(retailerId, start, end);
+                posSales = esimPosSaleRepository.findByRetailerIdAndSaleDateBetween(retailerId, start, end);
             } else {
-                allOrders = retailerOrderRepository.findByRetailerId(retailerId);
+                posSales = esimPosSaleRepository.findByRetailerId(retailerId);
             }
 
-            if (allOrders == null) {
-                allOrders = new ArrayList<>();
+            if (posSales == null) {
+                posSales = new ArrayList<>();
             }
 
-            System.out.println("Total orders found for retailer: " + allOrders.size());
+            System.out.println("Total POS sales found: " + posSales.size());
 
             List<Map<String, Object>> sales = new ArrayList<>();
             long totalEsimsSold = 0L;
             BigDecimal totalEarnings = BigDecimal.ZERO;
             long totalOrdersWithEsim = 0L;
 
-            for (RetailerOrder order : allOrders) {
-                if (order == null) {
-                    continue;
-                }
-
-                System.out.println("Processing order: " + order.getOrderNumber() + ", status: " + order.getStatus());
-
-                try {
-                    // Only include completed/delivered orders
-                    if (order.getStatus() != RetailerOrder.OrderStatus.COMPLETED &&
-                        order.getStatus() != RetailerOrder.OrderStatus.DELIVERED) {
-                        System.out.println("  Skipped - status not COMPLETED/DELIVERED");
+            // Process POS sales ONLY (EsimPosSale)
+            System.out.println("Processing " + posSales.size() + " POS sales...");
+            
+            // Apply product type filter for POS sales
+            // All POS sales are eSIM sales, so skip if filter is set to EPIN only
+            boolean includePOSSales = productType == null || productType.isEmpty() || 
+                                     productType.equalsIgnoreCase("ALL") || 
+                                     productType.equalsIgnoreCase("ESIM");
+            
+            if (includePOSSales) {
+                for (EsimPosSale posSale : posSales) {
+                    if (posSale == null) {
                         continue;
                     }
 
-                    String paymentMethod = order.getPaymentMethod() != null ? order.getPaymentMethod() : "";
+                    System.out.println("Processing POS sale: " + posSale.getId() + ", product: " + posSale.getProductName());
 
-                    boolean orderHasEsim = false;
-
-                    if (order.getItems() == null || order.getItems().isEmpty()) {
-                        System.out.println("  Skipped - no items");
-                        continue;
-                    }
-
-                    for (RetailerOrder.OrderItem item : order.getItems()) {
-                        if (item == null) {
-                            continue;
-                        }
-
-                        String cat = item.getCategory() != null ? item.getCategory() : "";
-                        String type = item.getProductType() != null ? item.getProductType() : "";
-
-                        System.out.println("  Item - category: '" + cat + "', productType: '" + type + "'");
-
-                        boolean isEsim = cat.toLowerCase().contains("esim") || type.toLowerCase().contains("esim");
-                        if (!isEsim) {
-                            System.out.println("  Skipped item - not eSIM");
-                            continue;
-                        }
-
-                        System.out.println("  ✅ Found eSIM item!");
-                        orderHasEsim = true;
-
-                        int quantity = item.getQuantity() != null ? item.getQuantity() : 0;
-                        BigDecimal itemTotal = item.getUnitPrice() != null
-                            ? item.getUnitPrice().multiply(BigDecimal.valueOf(quantity))
-                            : BigDecimal.ZERO;
+                    try {
+                        int quantity = 1; // POS sales are always 1 eSIM at a time
+                        BigDecimal totalAmount = posSale.getSalePrice() != null ? posSale.getSalePrice() : BigDecimal.ZERO;
 
                         totalEsimsSold += quantity;
-                        totalEarnings = totalEarnings.add(itemTotal);
+                        totalEarnings = totalEarnings.add(totalAmount);
+                        totalOrdersWithEsim++;
 
-                        // Try to fetch customer details and ICCID from EsimOrderRequest
-                        EsimOrderRequest esimOrder = null;
+                        Map<String, Object> sale = new HashMap<>();
+                    sale.put("orderId", posSale.getId());
+                    sale.put("orderNumber", "POS-" + posSale.getId()); // POS sales don't have order numbers
+                    sale.put("orderDate", posSale.getSaleDate());
+                    sale.put("productName", posSale.getProductName());
+                    
+                    // Get network provider from POS sale, product, or StockPool
+                    String networkProvider = posSale.getOperator() != null && !posSale.getOperator().isEmpty() ? posSale.getOperator() : null;
+                    
+                    if (networkProvider != null && !networkProvider.isEmpty()) {
+                        System.out.println("  ✓ Network provider from POS sale operator: " + networkProvider);
+                    }
+                    
+                    // If not set, try to get from stock pool or product
+                    if (networkProvider == null || networkProvider.isEmpty()) {
                         try {
-                            esimOrder = esimOrderRequestRepository.findByOrderNumber(order.getOrderNumber());
-                        } catch (Exception ignored) {
-                            // If lookup fails, continue without breaking the report
-                        }
-
-                        String customerName = esimOrder != null ? esimOrder.getCustomerFullName() : null;
-                        String customerEmail = esimOrder != null ? esimOrder.getCustomerEmail() : null;
-                        String iccidFromRequest = esimOrder != null ? esimOrder.getAssignedEsimSerial() : null;
-
-                        // Collect ICCIDs/serials
-                        List<String> iccids = new ArrayList<>();
-                        if (iccidFromRequest != null && !iccidFromRequest.isEmpty()) {
-                            iccids.add(iccidFromRequest);
-                        }
-
-                        // Fallback: check serialNumbers on the order item
-                        if (iccids.isEmpty() && item.getSerialNumbers() != null && !item.getSerialNumbers().isEmpty()) {
-                            iccids.addAll(item.getSerialNumbers());
-                        }
-
-                        // Fallback: lookup in stock pool by product and order reference
-                        if (iccids.isEmpty()) {
-                            try {
-                                List<StockPool> stockPools = stockPoolRepository.findByProductId(item.getProductId());
-                                if (stockPools != null) {
+                            // First try from StockPool using stockPoolId
+                            if (posSale.getStockPoolId() != null) {
+                                Optional<StockPool> poolOpt = stockPoolRepository.findById(posSale.getStockPoolId());
+                                if (poolOpt.isPresent()) {
+                                    StockPool pool = poolOpt.get();
+                                    if (pool.getNetworkProvider() != null && !pool.getNetworkProvider().isEmpty()) {
+                                        networkProvider = pool.getNetworkProvider();
+                                        System.out.println("  ✓ Network provider from StockPool (by ID): " + networkProvider);
+                                    }
+                                }
+                            }
+                            
+                            // Fallback: Try from StockPool by productId if still not found
+                            if ((networkProvider == null || networkProvider.isEmpty()) && posSale.getProductId() != null) {
+                                List<StockPool> stockPools = stockPoolRepository.findByProductId(posSale.getProductId());
+                                if (stockPools != null && !stockPools.isEmpty()) {
                                     for (StockPool pool : stockPools) {
-                                        if (pool != null && pool.getStockType() == StockPool.StockType.ESIM && pool.getItems() != null) {
-                                            for (StockPool.StockItem stockItem : pool.getItems()) {
-                                                if (stockItem == null) {
-                                                    continue;
-                                                }
-                                                String assignedTo = stockItem.getAssignedToOrderId();
-                                                if (assignedTo != null &&
-                                                    (assignedTo.equals(order.getId()) || assignedTo.equals(order.getOrderNumber()))) {
-                                                    String serial = stockItem.getSerialNumber();
-                                                    if (serial != null && !serial.isEmpty()) {
-                                                        iccids.add(serial);
-                                                    }
-                                                }
-                                            }
+                                        if (pool.getNetworkProvider() != null && !pool.getNetworkProvider().isEmpty()) {
+                                            networkProvider = pool.getNetworkProvider();
+                                            System.out.println("  ✓ Network provider from StockPool (by product ID): " + networkProvider);
+                                            break;
                                         }
                                     }
                                 }
-                            } catch (Exception e) {
-                                System.err.println("Error fetching ICCID/serials for order " + order.getOrderNumber() + ": " + e.getMessage());
                             }
+                            
+                            // Last resort: Try from Product metadata
+                            if ((networkProvider == null || networkProvider.isEmpty()) && posSale.getProductId() != null) {
+                                Optional<Product> productOpt = productRepository.findById(posSale.getProductId());
+                                if (productOpt.isPresent()) {
+                                    Product product = productOpt.get();
+                                    if (product.getMetadata() != null && product.getMetadata().get("operator") != null) {
+                                        networkProvider = product.getMetadata().get("operator");
+                                        System.out.println("  ✓ Network provider from Product metadata: " + networkProvider);
+                                    } else if (product.getSupportedNetworks() != null && !product.getSupportedNetworks().isEmpty()) {
+                                        networkProvider = String.join(", ", product.getSupportedNetworks());
+                                        System.out.println("  ✓ Network provider from Product supportedNetworks: " + networkProvider);
+                                    }
+                                }
+                            }
+                        } catch (Exception e) {
+                            System.err.println("Error fetching network provider for POS sale: " + e.getMessage());
                         }
-
-                        Map<String, Object> sale = new HashMap<>();
-                        sale.put("orderId", order.getId());
-                        sale.put("orderNumber", order.getOrderNumber());
-                        sale.put("orderDate", order.getCreatedDate());
-                        sale.put("productName", item.getProductName());
-                        sale.put("quantity", quantity);
-                        sale.put("totalAmount", itemTotal);
-                        sale.put("paymentMethod", paymentMethod);
-                        sale.put("customerName", customerName);
-                        sale.put("customerEmail", customerEmail);
-                        sale.put("iccids", iccids);
-                        if (!iccids.isEmpty()) {
-                            sale.put("iccid", iccids.get(0));
-                        }
-
-                        sales.add(sale);
+                    }
+                    
+                    // Set to empty string instead of "N/A" if still not found
+                    if (networkProvider == null || networkProvider.isEmpty()) {
+                        networkProvider = "";
+                        System.out.println("  ⚠️ Network provider not found, using empty string");
+                    }
+                    
+                    sale.put("networkProvider", networkProvider);
+                    
+                    sale.put("quantity", quantity);
+                    sale.put("totalAmount", totalAmount);
+                    sale.put("paymentMethod", "POS"); // POS sales don't have payment method stored
+                    
+                    // Add delivery method from POS sale (print or email)
+                    String deliveryMethod = posSale.getDeliveryMethod();
+                    sale.put("deliveryMethod", deliveryMethod != null ? deliveryMethod : "email");
+                    
+                    // POS sales customer info
+                    sale.put("customerName", posSale.getCustomerName());
+                    sale.put("customerEmail", posSale.getCustomerEmail());
+                    
+                    // ICCID info
+                    List<String> iccids = new ArrayList<>();
+                    if (posSale.getIccid() != null && !posSale.getIccid().isEmpty()) {
+                        iccids.add(posSale.getIccid());
+                    }
+                    sale.put("iccids", iccids);
+                    if (!iccids.isEmpty()) {
+                        sale.put("iccid", iccids.get(0));
                     }
 
-                    if (orderHasEsim) {
-                        totalOrdersWithEsim++;
-                    }
+                    sales.add(sale);
+                    System.out.println("  ✅ Added POS sale with delivery method: " + deliveryMethod);
                 } catch (Exception ex) {
-                    System.err.println("Error processing retailer eSIM sales report for order " + order.getOrderNumber() + ": " + ex.getMessage());
+                    System.err.println("Error processing POS sale " + posSale.getId() + ": " + ex.getMessage());
+                }
                 }
             }
 

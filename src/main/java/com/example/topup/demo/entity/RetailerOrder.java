@@ -132,6 +132,7 @@ public class RetailerOrder {
         // Product specifications
         private String dataAmount;
         private String validity;
+        private String networkProvider;
         
         // Constructors
         public OrderItem() {}
@@ -170,6 +171,9 @@ public class RetailerOrder {
         
         public String getValidity() { return validity; }
         public void setValidity(String validity) { this.validity = validity; }
+        
+        public String getNetworkProvider() { return networkProvider; }
+        public void setNetworkProvider(String networkProvider) { this.networkProvider = networkProvider; }
         
         public List<String> getSerialNumbers() { return serialNumbers; }
         public void setSerialNumbers(List<String> serialNumbers) { this.serialNumbers = serialNumbers; }

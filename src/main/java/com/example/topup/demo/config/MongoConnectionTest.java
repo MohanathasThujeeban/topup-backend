@@ -12,7 +12,7 @@ public class MongoConnectionTest implements CommandLineRunner {
 
     private final MongoTemplate mongoTemplate;
     
-    @Value("${spring.mongodb.uri:N/A}")
+    @Value("${spring.data.mongodb.uri:N/A}")
     private String mongoUri;
 
     public MongoConnectionTest(MongoTemplate mongoTemplate) {

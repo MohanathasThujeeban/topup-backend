@@ -17,6 +17,7 @@ import com.example.topup.demo.repository.RetailerOrderRepository;
 import com.example.topup.demo.repository.OrderRepository;
 import com.example.topup.demo.repository.RetailerLimitRepository;
 import com.example.topup.demo.repository.RetailerKickbackLimitRepository;
+import com.example.topup.demo.repository.StockPoolRepository;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -68,6 +69,9 @@ public class RetailerController {
 
     @Autowired
     private RetailerKickbackLimitRepository retailerKickbackLimitRepository;
+
+    @Autowired
+    private StockPoolRepository stockPoolRepository;
 
     // Get all orders for the authenticated retailer
     @GetMapping("/orders")
@@ -1070,6 +1074,12 @@ public class RetailerController {
             
             System.out.println("🛒 Processing " + saleType + " sale: " + quantity + "x " + bundleName + " (" + bundleId + ")");
             
+            // Fetch stock pool to get network provider information
+            StockPool pool = stockPoolRepository.findById(bundleId)
+                .orElseThrow(() -> new RuntimeException("Stock pool not found: " + bundleId));
+            String networkProvider = pool.getNetworkProvider();
+            System.out.println("📡 Network provider from pool: " + networkProvider);
+            
             // Assign stock items from admin pool
             List<Map<String, String>> assignedItems = new ArrayList<>();
             String orderId = "POS-" + System.currentTimeMillis();
@@ -1146,6 +1156,14 @@ public class RetailerController {
                 orderItem.setCategory(saleType.equalsIgnoreCase("ESIM") ? "ESIM" : "EPIN");
                 orderItem.setQuantity(quantity);
                 orderItem.setUnitPrice(BigDecimal.valueOf(unitPrice));
+                
+                // Set network provider from pool
+                if (networkProvider != null && !networkProvider.isEmpty()) {
+                    orderItem.setNetworkProvider(networkProvider);
+                    System.out.println("   📡 OrderItem Network Provider set: " + networkProvider);
+                } else {
+                    System.out.println("   ⚠️ Network Provider not available for OrderItem");
+                }
                 
                 // Add serial numbers to order item
                 List<String> serialNumbers = assignedItems.stream()
@@ -1294,11 +1312,12 @@ public class RetailerController {
     public ResponseEntity<Map<String, Object>> getEsimSalesReport(
             Authentication authentication,
             @RequestParam(required = false) String startDate,
-            @RequestParam(required = false) String endDate) {
+            @RequestParam(required = false) String endDate,
+            @RequestParam(required = false) String productType) {
         try {
             User retailer = getUserFromAuthentication(authentication);
 
-            Map<String, Object> reportData = adminService.getRetailerEsimSalesReport(retailer.getId(), startDate, endDate);
+            Map<String, Object> reportData = adminService.getRetailerEsimSalesReport(retailer.getId(), startDate, endDate, productType);
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
