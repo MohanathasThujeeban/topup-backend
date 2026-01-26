@@ -1,12 +1,12 @@
 package com.example.topup.demo.entity;
 
-import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.mapping.Document;
-import org.springframework.data.mongodb.core.mapping.DBRef;
-import org.springframework.data.mongodb.core.index.Indexed;
-
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+
+import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.Indexed;
+import org.springframework.data.mongodb.core.mapping.DBRef;
+import org.springframework.data.mongodb.core.mapping.Document;
 
 /**
  * Entity for storing eSIM Point of Sales transactions
@@ -87,6 +87,19 @@ public class EsimPosSale {
 
     // Delivery method (email or print)
     private String deliveryMethod; // "email" or "print"
+
+    // POS Type - distinguish between app and website POS
+    private String posType; // "APP" or "WEBSITE"
+    
+    private String poolId; // Stock pool ID
+    
+    private String itemId; // Stock item ID
+    
+    private String productType; // Product type (e.g., "Data", "Voice+Data")
+    
+    private String networkProvider; // Network provider name
+    
+    private Double price; // Sale price as double
 
     // Timestamps
     @Indexed
@@ -447,6 +460,54 @@ public class EsimPosSale {
 
     public void setDeliveryMethod(String deliveryMethod) {
         this.deliveryMethod = deliveryMethod;
+    }
+
+    public String getPosType() {
+        return posType;
+    }
+
+    public void setPosType(String posType) {
+        this.posType = posType;
+    }
+
+    public String getPoolId() {
+        return poolId;
+    }
+
+    public void setPoolId(String poolId) {
+        this.poolId = poolId;
+    }
+
+    public String getItemId() {
+        return itemId;
+    }
+
+    public void setItemId(String itemId) {
+        this.itemId = itemId;
+    }
+
+    public String getProductType() {
+        return productType;
+    }
+
+    public void setProductType(String productType) {
+        this.productType = productType;
+    }
+
+    public String getNetworkProvider() {
+        return networkProvider;
+    }
+
+    public void setNetworkProvider(String networkProvider) {
+        this.networkProvider = networkProvider;
+    }
+
+    public Double getPrice() {
+        return price;
+    }
+
+    public void setPrice(Double price) {
+        this.price = price;
     }
 
     // Mark sale as refunded

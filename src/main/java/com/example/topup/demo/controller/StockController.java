@@ -1,20 +1,12 @@
 package com.example.topup.demo.controller;
 
-import com.example.topup.demo.entity.StockPool;
-import com.example.topup.demo.entity.User;
-import com.example.topup.demo.entity.RetailerOrder;
-import com.example.topup.demo.entity.RetailerLimit;
-import com.example.topup.demo.entity.EsimOrderRequest;
-import com.example.topup.demo.entity.EsimPosSale;
-import com.example.topup.demo.service.StockService;
-import com.example.topup.demo.service.EmailService;
-import com.example.topup.demo.service.RetailerService;
-import com.example.topup.demo.repository.StockPoolRepository;
-import com.example.topup.demo.repository.UserRepository;
-import com.example.topup.demo.repository.RetailerOrderRepository;
-import com.example.topup.demo.repository.RetailerLimitRepository;
-import com.example.topup.demo.repository.EsimOrderRequestRepository;
-import com.example.topup.demo.repository.EsimPosSaleRepository;
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,15 +18,33 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import com.example.topup.demo.entity.EsimOrderRequest;
+import com.example.topup.demo.entity.EsimPosSale;
+import com.example.topup.demo.entity.RetailerLimit;
+import com.example.topup.demo.entity.RetailerOrder;
+import com.example.topup.demo.entity.StockPool;
+import com.example.topup.demo.entity.User;
+import com.example.topup.demo.repository.EsimOrderRequestRepository;
+import com.example.topup.demo.repository.EsimPosSaleRepository;
+import com.example.topup.demo.repository.RetailerLimitRepository;
+import com.example.topup.demo.repository.RetailerOrderRepository;
+import com.example.topup.demo.repository.StockPoolRepository;
+import com.example.topup.demo.repository.UserRepository;
+import com.example.topup.demo.service.EmailService;
+import com.example.topup.demo.service.RetailerService;
+import com.example.topup.demo.service.StockService;
 
 @RestController
 @RequestMapping("/api/admin/stock")
@@ -1381,6 +1391,159 @@ public class StockController {
             response.put("message", "Failed to send eSIM QR code");
             response.put("error", e.getMessage());
             
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
+    }
+
+    // POS Sale endpoint - Sell eSIM from app and record transaction
+    @PostMapping("/esims/pos-sale")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RETAILER')")
+    public ResponseEntity<Map<String, Object>> processPOSSale(
+            @RequestBody Map<String, Object> requestData,
+            Authentication authentication) {
+        
+        System.out.println("\n🛒 ===== POS Sale Request Received =====");
+        System.out.println("Request data: " + requestData);
+        String retailerEmail = authentication != null ? authentication.getName() : null;
+        if (retailerEmail == null) {
+            System.out.println("⚠️ Authentication is null - falling back to any BUSINESS user for POS sale");
+            List<User> businessUsers = userRepository.findByAccountType(User.AccountType.BUSINESS);
+            if (!businessUsers.isEmpty()) {
+                retailerEmail = businessUsers.get(0).getEmail();
+                System.out.println("👉 Using fallback BUSINESS user: " + retailerEmail);
+            } else {
+                retailerEmail = "pos-app@local";
+                System.out.println("👉 Using POS app fallback email: " + retailerEmail);
+            }
+        }
+        
+        try {
+            // Extract request parameters
+            String poolId = (String) requestData.get("poolId");
+            String itemId = (String) requestData.get("itemId");
+            String iccid = (String) requestData.get("iccid");
+            Double price = requestData.get("price") != null ? 
+                ((Number) requestData.get("price")).doubleValue() : 0.0;
+            String productId = (String) requestData.get("productId");
+            String productType = (String) requestData.get("productType");
+            String networkProvider = (String) requestData.get("networkProvider");
+            
+            // Validate required fields
+            if (poolId == null || itemId == null || iccid == null) {
+                throw new IllegalArgumentException("Missing required fields: poolId, itemId, or iccid");
+            }
+            
+            System.out.println("📋 Sale Details:");
+            System.out.println("   - Pool ID: " + poolId);
+            System.out.println("   - Item ID: " + itemId);
+            System.out.println("   - ICCID: " + iccid);
+            System.out.println("   - Price: " + price);
+            System.out.println("   - Product ID: " + productId);
+            System.out.println("   - Network Provider: " + networkProvider);
+            
+            // Get the stock pool
+            StockPool pool = stockService.getStockPoolById(poolId);
+            if (pool == null) {
+                throw new IllegalArgumentException("Stock pool not found");
+            }
+            
+            // Find the specific item
+            StockPool.StockItem item = null;
+            for (StockPool.StockItem stockItem : pool.getItems()) {
+                if (stockItem.getItemId().equals(itemId)) {
+                    item = stockItem;
+                    break;
+                }
+            }
+            
+            if (item == null) {
+                throw new IllegalArgumentException("eSIM item not found in stock pool");
+            }
+            
+            // Check if item is available
+            if (item.getStatus() != StockPool.StockItem.ItemStatus.AVAILABLE) {
+                throw new IllegalStateException("eSIM item is not available for sale");
+            }
+            
+            System.out.println("✅ eSIM item found and available");
+            
+            // Mark item as used (sold) in existing status model
+            item.setStatus(StockPool.StockItem.ItemStatus.USED);
+            item.setUsedDate(java.time.LocalDateTime.now());
+            item.setAssignedToUserEmail(retailerEmail);
+            
+            // Update pool quantities
+            pool.setAvailableQuantity(pool.getAvailableQuantity() - 1);
+            pool.setUsedQuantity(pool.getUsedQuantity() + 1);
+            
+            // Save updated pool
+            stockPoolRepository.save(pool);
+            System.out.println("✅ Stock updated - Available: " + pool.getAvailableQuantity());
+            
+            // Create POS sale record
+            EsimPosSale posSale = new EsimPosSale();
+            posSale.setPoolId(poolId);
+            posSale.setItemId(itemId);
+            posSale.setIccid(iccid);
+            posSale.setProductId(productId);
+            posSale.setProductType(productType);
+            posSale.setNetworkProvider(networkProvider);
+            posSale.setPrice(price);
+            posSale.setPosType("APP"); // Distinguish app POS from website POS
+            posSale.setDeliveryMethod("print"); // App POS uses print/display
+            posSale.setStockPoolId(poolId);
+            posSale.setStockPoolName(pool.getName());
+            posSale.setProductName(pool.getName());
+            posSale.setOperator(networkProvider);
+            posSale.setSalePrice(BigDecimal.valueOf(price));
+            posSale.setCreatedBy(retailerEmail);
+            posSale.setStatus(EsimPosSale.SaleStatus.COMPLETED);
+            
+            // Get user details for retailer info
+            User retailer = userRepository.findByEmail(retailerEmail).orElse(null);
+            if (retailer != null) {
+                posSale.setRetailer(retailer);
+            } else {
+                posSale.setRetailerId(retailerEmail);
+                posSale.setRetailerEmail(retailerEmail);
+            }
+            
+            // Save sale record
+            esimPosSaleRepository.save(posSale);
+            System.out.println("✅ POS sale recorded: " + posSale.getId());
+            
+            // Prepare response with decrypted data for receipt
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", "eSIM sold successfully");
+            response.put("saleId", posSale.getId());
+            response.put("iccid", iccid);
+            response.put("networkProvider", networkProvider);
+            response.put("productType", productType);
+            response.put("price", price);
+            
+            // Decrypt and include QR code for receipt
+            if (item.getQrCodeImage() != null && !item.getQrCodeImage().isEmpty()) {
+                String decryptedQr = stockService.decryptData(item.getQrCodeImage());
+                response.put("qrCodeImage", decryptedQr);
+            }
+            
+            System.out.println("✅ POS sale completed successfully");
+            return ResponseEntity.ok(response);
+            
+        } catch (IllegalArgumentException e) {
+            System.err.println("❌ Validation error: " + e.getMessage());
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", false);
+            response.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error processing POS sale: " + e.getMessage());
+            e.printStackTrace();
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", false);
+            response.put("message", "Failed to process sale: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
         }
     }
