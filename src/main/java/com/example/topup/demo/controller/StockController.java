@@ -3,6 +3,7 @@ package com.example.topup.demo.controller;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -82,6 +83,12 @@ public class StockController {
 
     @Autowired
     private com.example.topup.demo.repository.RetailerKickbackLimitRepository retailerKickbackLimitRepository;
+
+    @Autowired
+    private com.example.topup.demo.service.KickbackCampaignService kickbackCampaignService;
+
+    @Autowired
+    private com.example.topup.demo.service.RetailerLimitService retailerLimitService;
 
     // Test endpoint to verify controller is loaded
     @GetMapping("/test")
@@ -303,7 +310,6 @@ public class StockController {
             System.out.println("===============================================");
             
             // Convert QR code files to Base64 strings for storage
-            Map<Integer, String> qrCodeMap = new HashMap<>();
             if (qrCodeFiles != null && !qrCodeFiles.isEmpty()) {
                 System.out.println("🔄 Processing " + qrCodeFiles.size() + " QR code images...");
                 
@@ -753,7 +759,7 @@ public class StockController {
         System.out.println("Raw request body: " + requestBodyStr);
         System.out.println("Authentication principal: " + (authentication != null ? authentication.getPrincipal() : "null"));
         
-        Map<String, Object> requestData = new HashMap<>();
+        Map<String, Object> requestData;
         try {
             // Parse JSON string manually
             com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
@@ -827,13 +833,13 @@ public class StockController {
             }
             
             // Parse price
-            double price = 0;
+            double price = 0.0;
             try {
                 price = Double.parseDouble(priceStr);
                 System.out.println("✅ Price parsed: " + price);
             } catch (NumberFormatException e) {
                 System.err.println("⚠️ Invalid price format: " + priceStr + ", using 0");
-                price = 0;
+                price = 0.0;
             }
 
             System.out.println("\n📧 Preparing to send eSIM QR code:");
@@ -864,10 +870,9 @@ public class StockController {
                 System.out.println("      - SerialNumber: " + item.getSerialNumber());
                 
                 // Try to decrypt itemData to see if it contains ICCID
-                String decryptedItemData = null;
                 if (item.getItemData() != null && !item.getItemData().isEmpty()) {
                     try {
-                        decryptedItemData = stockService.decryptData(item.getItemData());
+                        String decryptedItemData = stockService.decryptData(item.getItemData());
                         System.out.println("      - ItemData (decrypted): " + decryptedItemData);
                     } catch (Exception e) {
                         System.out.println("      - ItemData (encrypted): " + item.getItemData().substring(0, Math.min(20, item.getItemData().length())) + "...");
@@ -1509,18 +1514,82 @@ public class StockController {
             }
             
             // Save sale record
-            esimPosSaleRepository.save(posSale);
-            System.out.println("✅ POS sale recorded: " + posSale.getId());
+            EsimPosSale savedPosSale = esimPosSaleRepository.save(posSale);
+            System.out.println("✅ POS sale recorded: " + savedPosSale.getId());
+            
+            // **CRITICAL ADDITION: Process credit limit and kickback like website POS**
+            if (retailer != null) {
+                try {
+                    System.out.println("🔄 Processing credit limit and kickback for POS sale...");
+                    
+                    // 1. DEDUCT FROM CREDIT LIMIT (like website POS does)
+                    try {
+                        retailerLimitService.useCredit(retailer.getId(), BigDecimal.valueOf(price), 
+                            savedPosSale.getId(), "POS App Sale - " + networkProvider + " eSIM");
+                        System.out.println("✅ Credit limit updated - Amount deducted: " + price);
+                    } catch (Exception creditEx) {
+                        System.err.println("⚠️ Credit limit update failed: " + creditEx.getMessage());
+                        // Continue processing even if credit limit update fails
+                    }
+                    
+                    // 2. PROCESS KICKBACK CAMPAIGNS (like website POS does)
+                    try {
+                        String retailerName = retailer.getFirstName() + " " + retailer.getLastName();
+                        kickbackCampaignService.processRetailerSale(
+                            retailerEmail, 
+                            retailerName, 
+                            productId != null ? productId : networkProvider,
+                            BigDecimal.valueOf(price)
+                        );
+                        System.out.println("✅ Kickback campaigns processed for sale");
+                    } catch (Exception kickbackEx) {
+                        System.err.println("⚠️ Kickback processing failed: " + kickbackEx.getMessage());
+                        // Continue processing even if kickback fails
+                    }
+                    
+                    System.out.println("✅ Credit limit and kickback processing completed");
+                } catch (Exception ex) {
+                    System.err.println("⚠️ Error in credit/kickback processing: " + ex.getMessage());
+                    ex.printStackTrace();
+                }
+            }
             
             // Prepare response with decrypted data for receipt
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
             response.put("message", "eSIM sold successfully");
-            response.put("saleId", posSale.getId());
+            response.put("saleId", savedPosSale.getId());
             response.put("iccid", iccid);
             response.put("networkProvider", networkProvider);
             response.put("productType", productType);
             response.put("price", price);
+            
+            // Include updated credit information (like website POS)
+            if (retailer != null) {
+                try {
+                    RetailerLimit updatedLimit = retailerLimitRepository.findByRetailer(retailer).orElse(null);
+                    if (updatedLimit != null) {
+                        Map<String, Object> creditInfo = new HashMap<>();
+                        creditInfo.put("availableCredit", updatedLimit.getAvailableCredit());
+                        creditInfo.put("usedCredit", updatedLimit.getUsedCredit());
+                        creditInfo.put("creditLimit", updatedLimit.getCreditLimit());
+                        
+                        // Calculate usage percentage
+                        double usagePercentage = 0.0;
+                        if (updatedLimit.getCreditLimit().compareTo(BigDecimal.ZERO) > 0) {
+                            usagePercentage = updatedLimit.getUsedCredit()
+                                .divide(updatedLimit.getCreditLimit(), 4, java.math.RoundingMode.HALF_UP)
+                                .multiply(BigDecimal.valueOf(100)).doubleValue();
+                        }
+                        creditInfo.put("creditUsagePercentage", usagePercentage);
+                        
+                        response.put("updatedCredit", creditInfo);
+                        System.out.println("📊 Updated credit info included in response");
+                    }
+                } catch (Exception ex) {
+                    System.err.println("⚠️ Could not include updated credit info: " + ex.getMessage());
+                }
+            }
             
             // Decrypt and include QR code for receipt
             if (item.getQrCodeImage() != null && !item.getQrCodeImage().isEmpty()) {
@@ -1546,5 +1615,494 @@ public class StockController {
             response.put("message", "Failed to process sale: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
         }
+    }
+    
+    // ePIN POS Sale endpoint - Sell ePIN from app and record transaction
+    @PostMapping("/pins/pos-sale")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RETAILER')")
+    public ResponseEntity<Map<String, Object>> processEpinPOSSale(
+            @RequestBody Map<String, Object> requestData,
+            Authentication authentication) {
+        
+        System.out.println("\n🏷️ ===== ePIN POS Sale Request Received =====");
+        System.out.println("Request data: " + requestData);
+        String retailerEmail = authentication != null ? authentication.getName() : null;
+        if (retailerEmail == null) {
+            System.out.println("⚠️ Authentication is null - falling back to any BUSINESS user for ePIN POS sale");
+            List<User> businessUsers = userRepository.findByAccountType(User.AccountType.BUSINESS);
+            if (!businessUsers.isEmpty()) {
+                retailerEmail = businessUsers.get(0).getEmail();
+                System.out.println("👉 Using fallback BUSINESS user: " + retailerEmail);
+            } else {
+                retailerEmail = "pos-app@local";
+                System.out.println("👉 Using POS app fallback email: " + retailerEmail);
+            }
+        }
+        
+        try {
+            // Extract request parameters
+            String productId = (String) requestData.get("productId");
+            String pinNumber = (String) requestData.get("pinNumber");
+            String serialNumber = (String) requestData.get("serialNumber");
+            Double price = requestData.get("price") != null ? 
+                ((Number) requestData.get("price")).doubleValue() : 0.0;
+            String productType = (String) requestData.get("productType");
+            String networkProvider = (String) requestData.get("networkProvider");
+            
+            // Validate required fields
+            if (productId == null || pinNumber == null || serialNumber == null) {
+                throw new IllegalArgumentException("Missing required fields: productId, pinNumber, or serialNumber");
+            }
+            
+            System.out.println("📋 ePIN Sale Details:");
+            System.out.println("   - Stock Pool ID: " + productId);
+            System.out.println("   - PIN Number: " + pinNumber.substring(0, Math.min(4, pinNumber.length())) + "***");
+            System.out.println("   - Serial Number: " + serialNumber);
+            System.out.println("   - Price: " + price);
+            System.out.println("   - Network Provider: " + networkProvider);
+            
+            // Get the stock pool (NOT product table)
+            StockPool stockPool = stockPoolRepository.findById(productId).orElse(null);
+            if (stockPool == null || stockPool.getStockType() != StockPool.StockType.EPIN) {
+                throw new IllegalArgumentException("ePIN stock pool not found");
+            }
+            
+            System.out.println("📦 Stock pool found: " + stockPool.getName());
+            System.out.println("   Available quantity: " + stockPool.getAvailableQuantity());
+            
+            // Find and mark the specific PIN as used in stock pool
+            List<StockPool.StockItem> items = stockPool.getItems();
+            StockPool.StockItem targetItem = null;
+            
+            if (items != null) {
+                for (StockPool.StockItem item : items) {
+                    // Decrypt the PIN to compare
+                    String decryptedPin = stockService.decryptData(item.getItemData());
+                    if (decryptedPin.equals(pinNumber) && item.getStatus() == StockPool.StockItem.ItemStatus.AVAILABLE) {
+                        targetItem = item;
+                        break;
+                    }
+                }
+            }
+            
+            if (targetItem == null) {
+                throw new IllegalStateException("ePIN not available for sale (already sold or not found)");
+            }
+            
+            System.out.println("✅ ePIN found and available in stock pool");
+            
+            // Mark PIN as USED (sold)
+            targetItem.setStatus(StockPool.StockItem.ItemStatus.USED);
+            targetItem.setAssignedToOrderId("POS-" + System.currentTimeMillis());
+            targetItem.setAssignedToUserEmail(retailerEmail);
+            targetItem.setUsedDate(java.time.LocalDateTime.now());
+            
+            // Update stock pool quantities
+            stockPool.setAvailableQuantity(stockPool.getAvailableQuantity() - 1);
+            Integer currentUsed = stockPool.getUsedQuantity();
+            stockPool.setUsedQuantity((currentUsed != null ? currentUsed : 0) + 1);
+            
+            // Save updated stock pool
+            stockPoolRepository.save(stockPool);
+            System.out.println("✅ ePIN marked as SOLD and stock pool updated");
+            
+            // Get user details for retailer info  
+            User retailer = userRepository.findByEmail(retailerEmail).orElse(null);
+            
+            // **CRITICAL: Process credit limit and kickback like eSIM POS**
+            if (retailer != null) {
+                try {
+                    System.out.println("🔄 Processing credit limit and kickback for ePIN POS sale...");
+                    
+                    // 1. DEDUCT FROM CREDIT LIMIT
+                    try {
+                        retailerLimitService.useCredit(retailer.getId(), BigDecimal.valueOf(price), 
+                            productId, "POS App ePIN Sale - " + networkProvider + " PIN");
+                        System.out.println("✅ Credit limit updated - Amount deducted: " + price);
+                    } catch (Exception creditEx) {
+                        System.err.println("⚠️ Credit limit update failed: " + creditEx.getMessage());
+                    }
+                    
+                    // 2. PROCESS KICKBACK CAMPAIGNS
+                    try {
+                        String retailerName = retailer.getFirstName() + " " + retailer.getLastName();
+                        kickbackCampaignService.processRetailerSale(
+                            retailerEmail, 
+                            retailerName, 
+                            productId,
+                            BigDecimal.valueOf(price)
+                        );
+                        System.out.println("✅ Kickback campaigns processed for ePIN sale");
+                    } catch (Exception kickbackEx) {
+                        System.err.println("⚠️ Kickback processing failed: " + kickbackEx.getMessage());
+                    }
+                    
+                    System.out.println("✅ Credit limit and kickback processing completed");
+                } catch (Exception ex) {
+                    System.err.println("⚠️ Error in credit/kickback processing: " + ex.getMessage());
+                    ex.printStackTrace();
+                }
+            }
+            
+            // **NEW: Create RetailerOrder and record profit (match eSIM implementation)**
+            try {
+                System.out.println("📝 Creating RetailerOrder and recording profit...");
+                
+                // 1. CREATE RETAILER ORDER
+                RetailerOrder order = new RetailerOrder();
+                order.setRetailerId(retailer.getId());
+                order.setOrderNumber("ePIN-POS-" + System.currentTimeMillis());
+                order.setNotes("POS App ePIN Sale - " + (networkProvider != null ? networkProvider : stockPool.getNetworkProvider()));
+                
+                // Create OrderItem for the ePIN
+                RetailerOrder.OrderItem item = new RetailerOrder.OrderItem();
+                item.setProductId(productId);
+                item.setProductName(stockPool.getName());
+                item.setProductType("EPIN");
+                item.setCategory("EPIN");
+                item.setQuantity(1);
+                item.setUnitPrice(BigDecimal.valueOf(price > 0 ? price : Double.parseDouble(stockPool.getPrice())));
+                item.setRetailPrice(BigDecimal.valueOf(price > 0 ? price : Double.parseDouble(stockPool.getPrice())));
+                item.setSerialNumbers(java.util.Arrays.asList(pinNumber));
+                
+                // Set network provider from pool
+                if (stockPool.getNetworkProvider() != null && !stockPool.getNetworkProvider().isEmpty()) {
+                    item.setNetworkProvider(stockPool.getNetworkProvider());
+                    System.out.println("   📡 OrderItem Network Provider set: " + stockPool.getNetworkProvider());
+                }
+                
+                order.addItem(item);
+                order.setTotalAmount(BigDecimal.valueOf(price > 0 ? price : Double.parseDouble(stockPool.getPrice())));
+                order.setCurrency("NOK");
+                order.setStatus(RetailerOrder.OrderStatus.COMPLETED);
+                order.setPaymentStatus(RetailerOrder.PaymentStatus.COMPLETED);
+                order.setPaymentMethod("POINT_OF_SALE");
+                order.setCreatedDate(java.time.LocalDateTime.now());
+                order.setLastModifiedDate(java.time.LocalDateTime.now());
+                order.setCreatedBy(retailerEmail);
+                
+                RetailerOrder savedOrder = retailerOrderRepository.save(order);
+                System.out.println("✅ RetailerOrder created: " + savedOrder.getOrderNumber());
+                
+                // 2. CREATE ESIM POS SALE RECORD (reuse for ePIN tracking)
+                EsimPosSale posSale = new EsimPosSale();
+                posSale.setRetailer(retailer);
+                posSale.setRetailerId(retailer.getId());
+                posSale.setRetailerEmail(retailerEmail);
+                posSale.setRetailerName(retailer.getFirstName() + " " + retailer.getLastName());
+                posSale.setProductName(stockPool.getName());
+                posSale.setProductId(productId);
+                posSale.setProductType("EPIN");
+                posSale.setBundleName(stockPool.getName());
+                posSale.setBundleId(productId);
+                posSale.setStockPoolId(productId);
+                posSale.setStockPoolName(stockPool.getName());
+                posSale.setSalePrice(BigDecimal.valueOf(price > 0 ? price : Double.parseDouble(stockPool.getPrice())));
+                posSale.setCurrency("NOK");
+                posSale.setOrderId(savedOrder.getId());
+                posSale.setOrderReference(savedOrder.getOrderNumber());
+                posSale.setStatus(EsimPosSale.SaleStatus.COMPLETED);
+                posSale.setPosType("APP"); // Distinguish app POS from website POS
+                posSale.setDeliveryMethod("print"); // App POS uses print/display
+                posSale.setCreatedBy(retailerEmail);
+                
+                // Set cost price if available
+                if (stockPool.getPrice() != null && !stockPool.getPrice().isEmpty()) {
+                    try {
+                        BigDecimal poolCostPrice = new BigDecimal(stockPool.getPrice());
+                        posSale.setCostPrice(poolCostPrice);
+                        BigDecimal salePrice = BigDecimal.valueOf(price > 0 ? price : Double.parseDouble(stockPool.getPrice()));
+                        posSale.setMargin(salePrice.subtract(poolCostPrice));
+                    } catch (NumberFormatException e) {
+                        posSale.setCostPrice(BigDecimal.ZERO);
+                    }
+                }
+                
+                // Set operator from networkProvider
+                if (stockPool.getNetworkProvider() != null && !stockPool.getNetworkProvider().isEmpty()) {
+                    posSale.setOperator(stockPool.getNetworkProvider());
+                }
+                
+                EsimPosSale savedPosSale = esimPosSaleRepository.save(posSale);
+                System.out.println("✅ EsimPosSale created for ePIN tracking: " + savedPosSale.getId());
+                
+                // 3. RECORD PROFIT
+                try {
+                    BigDecimal saleAmount = BigDecimal.valueOf(price > 0 ? price : Double.parseDouble(stockPool.getPrice()));
+                    BigDecimal costPrice = BigDecimal.ZERO;
+                    if (stockPool.getPrice() != null && !stockPool.getPrice().isEmpty()) {
+                        try {
+                            costPrice = new BigDecimal(stockPool.getPrice());
+                        } catch (NumberFormatException e) {
+                            costPrice = BigDecimal.ZERO;
+                        }
+                    }
+                    
+                    String bundleName = stockPool.getName();
+                    String bundleId = productId;
+                    Double marginRate = 0.0;
+                    
+                    if (costPrice.compareTo(BigDecimal.ZERO) > 0) {
+                        marginRate = ((saleAmount.subtract(costPrice)).divide(costPrice, 4, java.math.RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100))).doubleValue();
+                    }
+                    
+                    System.out.println("📊 Recording profit - Sale: " + saleAmount + ", Cost: " + costPrice + ", Margin: " + marginRate + "%");
+                    retailerService.recordProfit(retailer, saleAmount, costPrice, bundleName, bundleId, marginRate);
+                    System.out.println("✅ Profit/earnings recorded in retailer_profits collection");
+                } catch (Exception profitEx) {
+                    System.err.println("⚠️ Error recording profit: " + profitEx.getMessage());
+                }
+                
+                System.out.println("✅ RetailerOrder, POS Sale, and Profit tracking completed");
+            } catch (Exception orderEx) {
+                System.err.println("⚠️ Error creating order/profit records: " + orderEx.getMessage());
+                orderEx.printStackTrace();
+            }
+            
+            // Prepare response with complete receipt information
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", "ePIN sold successfully");
+            
+            // Generate unique IDs for tracking
+            String timestamp = String.valueOf(System.currentTimeMillis());
+            String orderId = "ORD-" + timestamp;
+            String transactionId = "TXN-" + timestamp;
+            
+            response.put("saleId", orderId);
+            response.put("orderId", orderId); // Add explicit orderId field
+            response.put("transactionId", transactionId);
+            
+            // PIN Information
+            response.put("pinNumber", pinNumber);
+            response.put("pinCode", pinNumber); // For display on receipt
+            
+            // Serial Number - Get from stock item or generate
+            String finalSerialNumber = serialNumber.equals("AUTO") || serialNumber == null || serialNumber.isEmpty() 
+                ? (targetItem.getSerialNumber() != null && !targetItem.getSerialNumber().isEmpty() 
+                    ? targetItem.getSerialNumber() 
+                    : "SN-" + timestamp.substring(timestamp.length() - 10))
+                : serialNumber;
+            response.put("serialNumber", finalSerialNumber);
+            
+            // Network Provider - Get from stock pool
+            String finalNetworkProvider = (networkProvider != null && !networkProvider.equals("AUTO")) 
+                ? networkProvider 
+                : (stockPool.getNetworkProvider() != null ? stockPool.getNetworkProvider() : "Unknown Provider");
+            response.put("networkProvider", finalNetworkProvider);
+            
+            // Product Information
+            response.put("productName", stockPool.getName());
+            response.put("productType", stockPool.getProductType() != null ? stockPool.getProductType() : "Bundle plans");
+            response.put("productCategory", stockPool.getProductType() != null ? stockPool.getProductType() : "Bundle plans");
+            
+            // Description - Build comprehensive description
+            String description = stockPool.getName();
+            if (stockPool.getDescription() != null && !stockPool.getDescription().isEmpty()) {
+                description += " - " + stockPool.getDescription();
+            }
+            response.put("description", description);
+            
+            // Price
+            double finalPrice = price > 0 ? price : Double.parseDouble(stockPool.getPrice());
+            response.put("price", finalPrice);
+            
+            // Additional details
+            response.put("validity", "30 days");
+            response.put("dataAmount", ""); // Not applicable for ePINs
+            
+            // Include updated credit information
+            if (retailer != null) {
+                try {
+                    RetailerLimit updatedLimit = retailerLimitRepository.findByRetailer(retailer).orElse(null);
+                    if (updatedLimit != null) {
+                        Map<String, Object> creditInfo = new HashMap<>();
+                        creditInfo.put("availableCredit", updatedLimit.getAvailableCredit());
+                        creditInfo.put("usedCredit", updatedLimit.getUsedCredit());
+                        creditInfo.put("creditLimit", updatedLimit.getCreditLimit());
+                        
+                        // Calculate usage percentage
+                        double usagePercentage = 0.0;
+                        if (updatedLimit.getCreditLimit().compareTo(BigDecimal.ZERO) > 0) {
+                            usagePercentage = updatedLimit.getUsedCredit()
+                                .divide(updatedLimit.getCreditLimit(), 4, java.math.RoundingMode.HALF_UP)
+                                .multiply(BigDecimal.valueOf(100)).doubleValue();
+                        }
+                        creditInfo.put("creditUsagePercentage", usagePercentage);
+                        
+                        response.put("updatedCredit", creditInfo);
+                        System.out.println("📊 Updated credit info included in ePIN response");
+                    }
+                } catch (Exception ex) {
+                    System.err.println("⚠️ Could not include updated credit info: " + ex.getMessage());
+                }
+            }
+            
+            // Log complete response for debugging
+            System.out.println("\n📋 ===== ePIN POS Sale Response =====");
+            System.out.println("✅ Sale ID: " + response.get("saleId"));
+            System.out.println("✅ Order ID: " + response.get("orderId"));
+            System.out.println("✅ Transaction ID: " + response.get("transactionId"));
+            System.out.println("✅ Serial Number: " + response.get("serialNumber"));
+            System.out.println("✅ Network Provider: " + response.get("networkProvider"));
+            System.out.println("✅ Product Name: " + response.get("productName"));
+            System.out.println("✅ Product Type: " + response.get("productType"));
+            System.out.println("✅ Product Category: " + response.get("productCategory"));
+            System.out.println("✅ Description: " + response.get("description"));
+            System.out.println("✅ Price: NOK " + response.get("price"));
+            System.out.println("✅ PIN Code: " + pinNumber.substring(0, Math.min(4, pinNumber.length())) + "***");
+            System.out.println("=========================================\n");
+            
+            System.out.println("✅ ePIN POS sale completed successfully");
+            return ResponseEntity.ok(response);
+            
+        } catch (IllegalArgumentException e) {
+            System.err.println("❌ Validation error: " + e.getMessage());
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", false);
+            response.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error processing ePIN POS sale: " + e.getMessage());
+            e.printStackTrace();
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", false);
+            response.put("message", "Failed to process ePIN sale: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
+    }
+    
+    // Get available ePINs with decrypted data for retailer Point of Sale
+    @GetMapping("/pins/available")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RETAILER')")
+    public ResponseEntity<List<Map<String, Object>>> getAvailableEpinsForSale(
+            @RequestParam(required = false) String networkProvider,
+            @RequestParam(required = false) String productCategory) {
+        try {
+            System.out.println("🏷️ Fetching available ePINs for Point of Sale");
+            System.out.println("   - Network Provider: " + networkProvider);
+            System.out.println("   - Product Category: " + productCategory);
+            
+            // Get all ePIN stock pools (changed from products to stock_pools)
+            List<StockPool> stockPools = stockPoolRepository.findAll();
+            System.out.println("📦 Total stock pools found: " + stockPools.size());
+            
+            // Filter by stockType = EPIN (enum comparison)
+            stockPools = stockPools.stream()
+                .filter(pool -> pool.getStockType() != null && pool.getStockType() == StockPool.StockType.EPIN)
+                .collect(java.util.stream.Collectors.toList());
+            System.out.println("📦 After EPIN filter: " + stockPools.size() + " pools");
+            
+            // Filter by network provider if specified  
+            if (networkProvider != null && !networkProvider.equals("All Providers")) {
+                stockPools = stockPools.stream()
+                    .filter(pool -> networkProvider.equals(pool.getNetworkProvider()))
+                    .collect(java.util.stream.Collectors.toList());
+                System.out.println("📦 After network provider filter: " + stockPools.size() + " pools");
+            }
+            
+            // Filter by category if specified
+            if (productCategory != null && !productCategory.isEmpty()) {
+                final int beforeCategoryFilter = stockPools.size();
+                stockPools = stockPools.stream()
+                    .filter(pool -> {
+                        boolean matches = productCategory.equals(pool.getProductType());
+                        System.out.println("   Pool: " + pool.getName() + " productType='" + pool.getProductType() + "' vs requested='" + productCategory + "' matches=" + matches);
+                        return matches;
+                    })
+                    .collect(java.util.stream.Collectors.toList());
+                System.out.println("📦 After category filter: " + stockPools.size() + " pools (from " + beforeCategoryFilter + ")");
+            }
+            
+            List<Map<String, Object>> availableEpins = new ArrayList<>();
+            
+            for (StockPool pool : stockPools) {
+                System.out.println("🔍 Checking pool: " + pool.getName() + " availableQty=" + pool.getAvailableQuantity());
+                // Only include pools with available stock
+                if (pool.getAvailableQuantity() <= 0) {
+                    System.out.println("   ⏭️ Skipping (no available quantity)");
+                    continue;
+                }
+                
+                Map<String, Object> epinProduct = new HashMap<>();
+                epinProduct.put("id", pool.getId());
+                epinProduct.put("name", pool.getName());
+                epinProduct.put("productId", pool.getProductId());
+                epinProduct.put("networkProvider", pool.getNetworkProvider());
+                epinProduct.put("category", pool.getProductType()); // "Topups", "Bundle plans", "Data plans"
+                double poolPrice = Double.parseDouble(pool.getPrice());
+                epinProduct.put("price", poolPrice);
+                epinProduct.put("basePrice", poolPrice); // Add basePrice for Android app
+                epinProduct.put("validity", "30 days"); // Default validity
+                epinProduct.put("dataAmount", ""); // Not applicable for ePINs
+                epinProduct.put("description", pool.getDescription());
+                epinProduct.put("stockQuantity", pool.getAvailableQuantity());
+                epinProduct.put("soldQuantity", pool.getUsedQuantity());
+                epinProduct.put("productType", pool.getProductType()); // Add productType field
+                epinProduct.put("status", "ACTIVE"); // Add status field
+                epinProduct.put("retailerCommissionPercentage", 30.0); // Default commission
+                
+                // Get available ePIN items - decrypt for POS display
+                List<String> availablePinNumbers = new ArrayList<>();
+                if (pool.getItems() != null) {
+                    for (StockPool.StockItem item : pool.getItems()) {
+                        // Check enum status correctly
+                        if (item.getStatus() == StockPool.StockItem.ItemStatus.AVAILABLE) {
+                            // Decrypt PIN for POS app to display
+                            String decryptedPin = stockService.decryptData(item.getItemData());
+                            availablePinNumbers.add(decryptedPin);
+                        }
+                    }
+                }
+                
+                epinProduct.put("availablePins", availablePinNumbers);
+                epinProduct.put("availableCount", availablePinNumbers.size());
+                
+                availableEpins.add(epinProduct);
+            }
+            
+            System.out.println("✅ Found " + availableEpins.size() + " ePIN products with available stock");
+            return ResponseEntity.ok(availableEpins);
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error fetching available ePINs: " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+    
+    // Get network providers for ePIN selection
+    @GetMapping("/network-providers")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RETAILER')")
+    public ResponseEntity<List<Map<String, Object>>> getNetworkProviders() {
+        System.out.println("🌐 Fetching network providers for ePIN selection");
+        
+        List<Map<String, Object>> networkProviders = new ArrayList<>();
+        
+        // Add the 3 network providers
+        Map<String, Object> lycamobile = new HashMap<>();
+        lycamobile.put("id", "lycamobile");
+        lycamobile.put("name", "Lycamobile");
+        lycamobile.put("logo", "lycamobile_logo.png");
+        lycamobile.put("categories", Arrays.asList("Topups", "Bundle plans", "Data plans"));
+        networkProviders.add(lycamobile);
+        
+        Map<String, Object> tellenor = new HashMap<>();
+        tellenor.put("id", "tellenor");
+        tellenor.put("name", "Tellenor");
+        tellenor.put("logo", "tellenor_logo.png");
+        tellenor.put("categories", Arrays.asList("Topups", "Bundle plans", "Data plans"));
+        networkProviders.add(tellenor);
+        
+        Map<String, Object> telia = new HashMap<>();
+        telia.put("id", "telia");
+        telia.put("name", "Telia");
+        telia.put("logo", "telia_logo.png");
+        telia.put("categories", Arrays.asList("Topups", "Bundle plans", "Data plans"));
+        networkProviders.add(telia);
+        
+        System.out.println("✅ Returning " + networkProviders.size() + " network providers");
+        return ResponseEntity.ok(networkProviders);
     }
 }

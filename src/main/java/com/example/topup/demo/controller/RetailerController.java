@@ -40,7 +40,7 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/api/retailer")
 @PreAuthorize("hasRole('BUSINESS')")
-@CrossOrigin(origins = {"http://localhost:3001", "http://localhost:5173", "https://topup.neirahtech", "https://topup-website-gmoj.vercel.app"})
+@CrossOrigin(origins = {"http://localhost:3000", "http://localhost:3001", "http://localhost:5173", "https://topup.neirahtech", "https://topup-website-gmoj.vercel.app"})
 public class RetailerController {
 
     @Autowired
@@ -1074,9 +1074,18 @@ public class RetailerController {
             
             System.out.println("🛒 Processing " + saleType + " sale: " + quantity + "x " + bundleName + " (" + bundleId + ")");
             
-            // Fetch stock pool to get network provider information
-            StockPool pool = stockPoolRepository.findById(bundleId)
-                .orElseThrow(() -> new RuntimeException("Stock pool not found: " + bundleId));
+            // Fetch stock pool by productId (bundleId is actually the productId from frontend)
+            Optional<StockPool> poolOpt = stockPoolRepository.findByProductIdAndStockType(
+                bundleId, 
+                saleType.equalsIgnoreCase("ESIM") ? StockPool.StockType.ESIM : StockPool.StockType.EPIN
+            );
+            
+            if (!poolOpt.isPresent()) {
+                System.err.println("❌ Stock pool not found for productId: " + bundleId);
+                throw new RuntimeException("Stock pool not found for product: " + bundleName);
+            }
+            
+            StockPool pool = poolOpt.get();
             String networkProvider = pool.getNetworkProvider();
             System.out.println("📡 Network provider from pool: " + networkProvider);
             
@@ -1087,7 +1096,7 @@ public class RetailerController {
             
             for (int i = 0; i < quantity; i++) {
                 try {
-                    // Assign stock from admin pool
+                    // Assign stock from admin pool using productId
                     StockPool.StockItem item = stockService.assignStockToOrder(
                         bundleId, 
                         stockType, 
