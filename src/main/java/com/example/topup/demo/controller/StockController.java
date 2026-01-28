@@ -1690,6 +1690,10 @@ public class StockController {
             }
             
             System.out.println("✅ ePIN found and available in stock pool");
+            System.out.println("   Serial Number: " + targetItem.getSerialNumber());
+            
+            // Store the actual serial number for later use in order
+            String actualSerialNumber = targetItem.getSerialNumber();
             
             // Mark PIN as USED (sold)
             targetItem.setStatus(StockPool.StockItem.ItemStatus.USED);
@@ -1763,7 +1767,15 @@ public class StockController {
                 item.setQuantity(1);
                 item.setUnitPrice(BigDecimal.valueOf(price > 0 ? price : Double.parseDouble(stockPool.getPrice())));
                 item.setRetailPrice(BigDecimal.valueOf(price > 0 ? price : Double.parseDouble(stockPool.getPrice())));
-                item.setSerialNumbers(java.util.Arrays.asList(pinNumber));
+                
+                // Store both the PIN (for POS app display) and serial number (for analytics)
+                // PINs are stored separately for display, serial number is for tracking
+                List<String> itemSerials = new ArrayList<>();
+                itemSerials.add(pinNumber); // First element is the PIN for POS app compatibility
+                if (actualSerialNumber != null && !actualSerialNumber.isEmpty()) {
+                    itemSerials.add(actualSerialNumber); // Second element is the actual serial number
+                }
+                item.setSerialNumbers(itemSerials);
                 
                 // Set network provider from pool
                 if (stockPool.getNetworkProvider() != null && !stockPool.getNetworkProvider().isEmpty()) {
@@ -1995,7 +2007,7 @@ public class StockController {
             System.out.println("📦 After EPIN filter: " + stockPools.size() + " pools");
             
             // Filter by network provider if specified  
-            if (networkProvider != null && !networkProvider.equals("All Providers")) {
+            if (networkProvider != null && !networkProvider.isEmpty() && !networkProvider.equals("All Providers")) {
                 stockPools = stockPools.stream()
                     .filter(pool -> networkProvider.equals(pool.getNetworkProvider()))
                     .collect(java.util.stream.Collectors.toList());

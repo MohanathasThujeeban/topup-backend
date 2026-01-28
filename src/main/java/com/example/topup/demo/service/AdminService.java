@@ -1,30 +1,21 @@
 package com.example.topup.demo.service;
 
-import com.example.topup.demo.entity.User;
-import com.example.topup.demo.entity.BusinessDetails;
-import com.example.topup.demo.entity.Order;
-import com.example.topup.demo.entity.RetailerOrder;
-import com.example.topup.demo.entity.RetailerLimit;
-import com.example.topup.demo.entity.EsimOrderRequest;
-import com.example.topup.demo.entity.EsimPosSale;
-import com.example.topup.demo.entity.StockPool;
-import com.example.topup.demo.entity.RetailerKickbackLimit;
-import com.example.topup.demo.entity.Product;
-import com.example.topup.demo.dto.RetailerCreditLimitDTO;
-import com.example.topup.demo.dto.UpdateCreditLimitRequest;
-import com.example.topup.demo.dto.UpdateUnitLimitRequest;
-import com.example.topup.demo.dto.UpdateKickbackLimitRequest;
-import com.example.topup.demo.dto.RetailerKickbackLimitDTO;
-import com.example.topup.demo.repository.UserRepository;
-import com.example.topup.demo.repository.BusinessDetailsRepository;
-import com.example.topup.demo.repository.OrderRepository;
-import com.example.topup.demo.repository.RetailerOrderRepository;
-import com.example.topup.demo.repository.RetailerLimitRepository;
-import com.example.topup.demo.repository.EsimOrderRequestRepository;
-import com.example.topup.demo.repository.EsimPosSaleRepository;
-import com.example.topup.demo.repository.StockPoolRepository;
-import com.example.topup.demo.repository.RetailerKickbackLimitRepository;
-import com.example.topup.demo.repository.ProductRepository;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Random;
+import java.util.Set;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,11 +24,31 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
-import java.math.BigDecimal;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.*;
-import java.util.stream.Collectors;
+
+import com.example.topup.demo.dto.RetailerCreditLimitDTO;
+import com.example.topup.demo.dto.RetailerKickbackLimitDTO;
+import com.example.topup.demo.dto.UpdateCreditLimitRequest;
+import com.example.topup.demo.dto.UpdateKickbackLimitRequest;
+import com.example.topup.demo.entity.BusinessDetails;
+import com.example.topup.demo.entity.EsimOrderRequest;
+import com.example.topup.demo.entity.EsimPosSale;
+import com.example.topup.demo.entity.Order;
+import com.example.topup.demo.entity.Product;
+import com.example.topup.demo.entity.RetailerKickbackLimit;
+import com.example.topup.demo.entity.RetailerLimit;
+import com.example.topup.demo.entity.RetailerOrder;
+import com.example.topup.demo.entity.StockPool;
+import com.example.topup.demo.entity.User;
+import com.example.topup.demo.repository.BusinessDetailsRepository;
+import com.example.topup.demo.repository.EsimOrderRequestRepository;
+import com.example.topup.demo.repository.EsimPosSaleRepository;
+import com.example.topup.demo.repository.OrderRepository;
+import com.example.topup.demo.repository.ProductRepository;
+import com.example.topup.demo.repository.RetailerKickbackLimitRepository;
+import com.example.topup.demo.repository.RetailerLimitRepository;
+import com.example.topup.demo.repository.RetailerOrderRepository;
+import com.example.topup.demo.repository.StockPoolRepository;
+import com.example.topup.demo.repository.UserRepository;
 
 @Service
 public class AdminService {
@@ -1720,10 +1731,74 @@ public class AdminService {
                         // First check if serial numbers are already stored in the OrderItem
                         List<String> serialNumbers = new ArrayList<>();
                         Set<String> encryptedPinsSet = new HashSet<>(); // Use Set to avoid duplicates
+                        List<String> plainTextPinsFromPOS = new ArrayList<>(); // For POS orders that store plain text PINs
+                        
+                        // Check if PIN is stored in order notes (for public ePIN orders)
+                        if (order.getNotes() != null && order.getNotes().startsWith("ENCRYPTED_PIN:")) {
+                            String pinData = order.getNotes().substring("ENCRYPTED_PIN:".length());
+                            if (pinData != null && !pinData.isEmpty()) {
+                                encryptedPinsSet.add(pinData.trim());
+                                System.out.println("✅ Found encrypted PIN in order notes: " + order.getOrderNumber());
+                            }
+                        }
+                        
+                        // Check if this is a POS order
+                        // POS App orders: orderNumber starts with "ePIN-POS-" and notes contain "POS App ePIN Sale"
+                        // Web POS orders: orderNumber starts with "POS-" (not "ePIN-POS-")
+                        boolean isPOSAppOrder = order.getNotes() != null && order.getNotes().contains("POS App ePIN Sale");
+                        boolean isWebPOSOrder = order.getOrderNumber() != null && 
+                                               order.getOrderNumber().startsWith("POS-") && 
+                                               !order.getOrderNumber().startsWith("ePIN-POS-");
+                        boolean isPOSOrder = isPOSAppOrder || isWebPOSOrder;
                         
                         if (item.getSerialNumbers() != null && !item.getSerialNumbers().isEmpty()) {
-                            // Use serial numbers from the order item (POS sales)
-                            serialNumbers = item.getSerialNumbers();
+                            // For ePIN from POS App: serialNumbers[0] = PLAIN TEXT PIN, serialNumbers[1] = actual serial number (if exists)
+                            // For ePIN from Web POS: serialNumbers contain actual serial numbers (correct behavior)
+                            if (type.equals("ePIN") && isPOSAppOrder) {
+                                // POS APP ePIN orders store DECRYPTED/PLAIN TEXT PINs in serialNumbers[0]
+                                // and actual serial number in serialNumbers[1] (if available)
+                                List<String> orderSerials = item.getSerialNumbers();
+                                
+                                // Extract PIN (always first element)
+                                if (orderSerials.size() > 0 && orderSerials.get(0) != null && !orderSerials.get(0).isEmpty()) {
+                                    plainTextPinsFromPOS.add(orderSerials.get(0));
+                                    System.out.println("✅ Found plain text PIN from POS App order: " + order.getOrderNumber());
+                                }
+                                
+                                // Extract actual serial number (second element if exists)
+                                if (orderSerials.size() > 1 && orderSerials.get(1) != null && !orderSerials.get(1).isEmpty()) {
+                                    serialNumbers.add(orderSerials.get(1));
+                                    System.out.println("✅ Found serial number from POS App order: " + orderSerials.get(1));
+                                } else {
+                                    // Fallback: fetch serial number from StockPool by matching the PIN
+                                    System.out.println("⚠️ No serial number in order, fetching from StockPool...");
+                                    try {
+                                        List<StockPool> stockPools = stockPoolRepository.findByProductId(item.getProductId());
+                                        for (StockPool pool : stockPools) {
+                                            if (pool.getStockType() == stockType && pool.getItems() != null) {
+                                                for (StockPool.StockItem stockItem : pool.getItems()) {
+                                                    try {
+                                                        String decryptedPin = stockService.decryptData(stockItem.getItemData());
+                                                        if (orderSerials.get(0).equals(decryptedPin)) {
+                                                            serialNumbers.add(stockItem.getSerialNumber());
+                                                            System.out.println("✅ Found serial number from StockPool: " + stockItem.getSerialNumber());
+                                                            break;
+                                                        }
+                                                    } catch (Exception e) {
+                                                        // Skip if decryption fails
+                                                    }
+                                                }
+                                                if (!serialNumbers.isEmpty()) break;
+                                            }
+                                        }
+                                    } catch (Exception e) {
+                                        System.err.println("Error fetching serial number for POS App ePIN: " + e.getMessage());
+                                    }
+                                }
+                            } else {
+                                // For eSIM, Web POS ePIN, or non-POS orders: use serial numbers from the order item
+                                serialNumbers = item.getSerialNumbers();
+                            }
                             
                             // Fetch the actual encrypted PINs from StockPool using serial numbers
                             try {
@@ -1783,56 +1858,80 @@ public class AdminService {
                             // Always show serial numbers as-is (they're just identifiers)
                             itemData.put("serialNumbers", serialNumbers);
                             itemData.put("serialNumber", String.join(", ", serialNumbers));
-                            
-                            // For ePIN items, add decrypted PINs in a separate field (visible for 24 hours only)
-                            if (type.equals("ePIN")) {
-                                LocalDateTime orderDate = order.getCreatedDate();
-                                LocalDateTime now = LocalDateTime.now();
-                                LocalDateTime twentyFourHoursAgo = now.minusHours(24);
-                                
-                                // Show decrypted PIN only if order is within last 24 hours
-                                boolean showDecrypted = orderDate.isAfter(twentyFourHoursAgo);
-                                
-                                if (showDecrypted && !encryptedPins.isEmpty()) {
-                                    // Decrypt and show the actual PINs (unique only)
-                                    List<String> decryptedPins = new ArrayList<>();
-                                    for (String encryptedPin : encryptedPins) {
-                                        try {
-                                            String decrypted = stockService.decryptData(encryptedPin);
-                                            decryptedPins.add(decrypted);
-                                        } catch (Exception e) {
-                                            // If decryption fails, show as-is (might be already decrypted)
-                                            decryptedPins.add(encryptedPin);
-                                        }
-                                    }
-                                    itemData.put("pins", decryptedPins);
-                                    itemData.put("pin", String.join(", ", decryptedPins));
-                                    itemData.put("pinVisible", true);
-                                } else {
-                                    // Hide PINs after 24 hours
-                                    itemData.put("pins", new ArrayList<>());
-                                    itemData.put("pin", "Hidden (24h expired)");
-                                    itemData.put("pinVisible", false);
-                                }
-                            } else {
-                                // For eSIM, no PIN field needed
-                                itemData.put("pinVisible", false);
-                            }
                         } else {
                             itemData.put("serialNumbers", new ArrayList<>());
                             itemData.put("serialNumber", "Not assigned yet");
                         }
                         
+                        // For ePIN items, add decrypted PINs in a separate field
+                        // Hide PINs after 24 hours from order creation
+                        if (type.equals("ePIN")) {
+                            List<String> allPins = new ArrayList<>();
+                            
+                            // First add plain text PINs from POS orders (already decrypted)
+                            allPins.addAll(plainTextPinsFromPOS);
+                            
+                            // Then decrypt and add encrypted PINs
+                            if (!encryptedPins.isEmpty()) {
+                                for (String encryptedPin : encryptedPins) {
+                                    try {
+                                        String decrypted = stockService.decryptData(encryptedPin);
+                                        allPins.add(decrypted);
+                                    } catch (Exception e) {
+                                        // If decryption fails, show as-is (might be already decrypted)
+                                        allPins.add(encryptedPin);
+                                    }
+                                }
+                            }
+                            
+                            // Check if order is older than 24 hours
+                            boolean isOlderThan24Hours = false;
+                            if (order.getCreatedDate() != null) {
+                                java.time.LocalDateTime createdDate = order.getCreatedDate();
+                                java.time.LocalDateTime now = java.time.LocalDateTime.now();
+                                java.time.Duration duration = java.time.Duration.between(createdDate, now);
+                                isOlderThan24Hours = duration.toHours() >= 24;
+                            }
+                            
+                            if (!allPins.isEmpty()) {
+                                if (isOlderThan24Hours) {
+                                    // Hide PINs for orders older than 24 hours
+                                    itemData.put("pins", new ArrayList<>());
+                                    itemData.put("pin", "Hidden (24h expired)");
+                                    itemData.put("pinVisible", false);
+                                } else {
+                                    // Show PINs for recent orders (within 24 hours)
+                                    itemData.put("pins", allPins);
+                                    itemData.put("pin", String.join(", ", allPins));
+                                    itemData.put("pinVisible", true);
+                                }
+                            } else {
+                                // No PINs available
+                                itemData.put("pins", new ArrayList<>());
+                                itemData.put("pin", "N/A");
+                                itemData.put("pinVisible", false);
+                            }
+                        } else {
+                            // For eSIM, no PIN field needed
+                            itemData.put("pinVisible", false);
+                        }
+                        
                         // Fetch network provider from StockPool
                         String networkProvider = "N/A";
                         try {
-                            // Find stock pool for this product
-                            List<StockPool> stockPools = stockPoolRepository.findByProductId(item.getProductId());
-                            if (stockPools != null && !stockPools.isEmpty()) {
-                                for (StockPool pool : stockPools) {
-                                    if (pool.getStockType() == stockType && pool.getNetworkProvider() != null && !pool.getNetworkProvider().isEmpty()) {
-                                        networkProvider = pool.getNetworkProvider();
-                                        break;
+                            // First try to get pool directly by ID (for POS orders where productId is the pool ID)
+                            Optional<StockPool> poolById = stockPoolRepository.findById(item.getProductId());
+                            if (poolById.isPresent() && poolById.get().getNetworkProvider() != null && !poolById.get().getNetworkProvider().isEmpty()) {
+                                networkProvider = poolById.get().getNetworkProvider();
+                            } else {
+                                // Fallback: Find stock pool by product ID
+                                List<StockPool> stockPools = stockPoolRepository.findByProductId(item.getProductId());
+                                if (stockPools != null && !stockPools.isEmpty()) {
+                                    for (StockPool pool : stockPools) {
+                                        if (pool.getStockType() == stockType && pool.getNetworkProvider() != null && !pool.getNetworkProvider().isEmpty()) {
+                                            networkProvider = pool.getNetworkProvider();
+                                            break;
+                                        }
                                     }
                                 }
                             }
