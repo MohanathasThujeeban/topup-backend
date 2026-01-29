@@ -1,7 +1,8 @@
 package com.example.topup.demo.service;
 
-import jakarta.mail.MessagingException;
-import jakarta.mail.internet.MimeMessage;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,10 +13,8 @@ import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.io.IOException;
-import java.io.InputStream;
+import jakarta.mail.MessagingException;
+import jakarta.mail.internet.MimeMessage;
 
 @Service
 public class EmailService {
@@ -333,6 +332,64 @@ public class EmailService {
         } catch (Exception e) {
             log.error("Failed to send eSIM rejection email to: {}", toEmail, e);
             throw new RuntimeException("Failed to send eSIM rejection email", e);
+        }
+    }
+
+    /**
+     * Send eSIM QR code via email for POS app
+     */
+    public void sendEsimQrCodeEmail(String toEmail, String firstName, String lastName, 
+                                    String networkProvider, String productType, 
+                                    String qrCodeBase64, String iccid) {
+        try {
+            log.info("=== Sending eSIM QR code email ===");
+            log.info("To: {}", toEmail);
+            log.info("QR code length: {}", qrCodeBase64 != null ? qrCodeBase64.length() : 0);
+            
+            String customerName = firstName + " " + lastName;
+            
+            // Create HTML with CID reference instead of base64
+            String htmlContent = generateEsimQrCodeHtmlWithCid(
+                customerName, 
+                networkProvider, 
+                productType, 
+                iccid
+            );
+            
+            // Send email with inline attachment
+            MimeMessage message = javaMailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+            
+            helper.setFrom(fromEmail);
+            helper.setTo(toEmail);
+            helper.setSubject("Your eSIM QR Code - " + networkProvider + " - " + appName);
+            helper.setText(htmlContent, true);
+            
+            // Add QR code as inline attachment
+            if (qrCodeBase64 != null && !qrCodeBase64.isEmpty()) {
+                try {
+                    log.info("Adding QR code as inline attachment...");
+                    byte[] qrBytes = java.util.Base64.getDecoder().decode(qrCodeBase64);
+                    log.info("QR decoded to {} bytes", qrBytes.length);
+                    
+                    // Use ByteArrayResource instead of ByteArrayDataSource
+                    org.springframework.core.io.ByteArrayResource qrResource = new org.springframework.core.io.ByteArrayResource(qrBytes);
+                    helper.addInline("qrcode", qrResource, "image/png");
+                    log.info("✅ QR code attached successfully");
+                } catch (Exception attachEx) {
+                    log.error("❌ Failed to attach QR code: {}", attachEx.getMessage());
+                    throw attachEx;
+                }
+            } else {
+                log.warn("⚠️ QR code is null or empty, skipping attachment");
+            }
+            
+            javaMailSender.send(message);
+            log.info("✅ eSIM QR code email sent successfully to: {}", toEmail);
+        } catch (Exception e) {
+            log.error("❌ Failed to send eSIM QR code email to: {}", toEmail, e);
+            e.printStackTrace();
+            throw new RuntimeException("Failed to send eSIM QR code email: " + e.getMessage(), e);
         }
     }
 
@@ -1121,6 +1178,177 @@ a:hover{text-decoration:underline}
             appUrl,
             supportEmail, 
             supportEmail
+        );
+    }
+
+    /**
+     * Generate HTML for eSIM QR code email (for POS app)
+     */
+    private String generateEsimQrCodeHtml(String customerName, String networkProvider, 
+                                          String productType, String qrCodeBase64, String iccid) {
+        String qrCodeImage = "";
+        if (qrCodeBase64 != null && !qrCodeBase64.isEmpty()) {
+            qrCodeImage = "<img src=\"data:image/png;base64," + qrCodeBase64 + "\" " +
+                         "alt=\"eSIM QR Code\" " +
+                         "style=\"display: block; width: 250px; height: 250px; margin: 20px auto; border: 2px solid #e5e7eb; border-radius: 12px; padding: 10px; background: white;\" " +
+                         "/>";
+        } else {
+            qrCodeImage = "<p style=\"color: #dc2626; text-align: center; font-weight: bold;\">⚠️ QR Code not available</p>";
+        }
+
+        return String.format("""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Your eSIM QR Code</title>
+            </head>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
+                <div style="background: linear-gradient(135deg, #06b6d4 0%%, #0891b2 100%%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+                    <h1 style="color: white; margin: 0; font-size: 28px;">📱 Your eSIM QR Code</h1>
+                </div>
+                
+                <div style="background: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <h2 style="color: #333; margin-bottom: 20px;">Hi %s,</h2>
+                    
+                    <p style="margin-bottom: 20px;">
+                        Thank you for your purchase! Your eSIM QR code is ready to use.
+                    </p>
+                    
+                    <div style="background: #f0f9ff; border: 2px solid #bae6fd; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                        <h3 style="margin-top: 0; color: #0c4a6e;">📋 eSIM Details</h3>
+                        <p style="margin: 5px 0;"><strong>Network Provider:</strong> %s</p>
+                        <p style="margin: 5px 0;"><strong>Product Type:</strong> %s</p>
+                        <p style="margin: 5px 0;"><strong>ICCID:</strong> %s</p>
+                    </div>
+                    
+                    <div style="background: #f9fafb; border: 2px solid #e5e7eb; padding: 20px; border-radius: 8px; margin: 20px 0; text-align: center;">
+                        <h3 style="margin-top: 0; color: #1f2937;">📱 Scan this QR Code</h3>
+                        %s
+                        <p style="color: #6b7280; font-size: 14px; margin-top: 15px; font-style: italic;">
+                            Point your device's camera at the QR code to install the eSIM
+                        </p>
+                    </div>
+                    
+                    <div style="background: #ecfeff; border-left: 4px solid #06b6d4; padding: 15px; margin: 20px 0; border-radius: 5px;">
+                        <h3 style="margin-top: 0; color: #155e75;">📝 How to Install</h3>
+                        <ol style="color: #164e63; margin: 10px 0; padding-left: 20px;">
+                            <li style="margin: 8px 0;">Go to <strong>Settings</strong> on your device</li>
+                            <li style="margin: 8px 0;">Navigate to <strong>Mobile Data / Cellular</strong></li>
+                            <li style="margin: 8px 0;">Select <strong>Add eSIM</strong> or <strong>Add Mobile Plan</strong></li>
+                            <li style="margin: 8px 0;">Scan the QR code above</li>
+                            <li style="margin: 8px 0;">Follow the on-screen instructions to complete setup</li>
+                        </ol>
+                    </div>
+                    
+                    <div style="background: #fef3c7; border: 2px solid #fde68a; padding: 15px; margin: 20px 0; border-radius: 8px;">
+                        <p style="margin: 0; color: #92400e;">
+                            <strong>⚠️ Important:</strong> Don't delete this eSIM after installation. Keep this email for your records.
+                        </p>
+                    </div>
+                    
+                    <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+                    
+                    <p style="color: #6b7280; font-size: 14px; text-align: center; margin: 0;">
+                        Need help? Contact us at <a href="mailto:%s" style="color: #06b6d4; text-decoration: none;">%s</a>
+                    </p>
+                </div>
+                
+                <div style="text-align: center; padding: 20px; color: #9ca3af; font-size: 12px;">
+                    <p style="margin: 5px 0;">&copy; 2026 %s. All rights reserved.</p>
+                </div>
+            </body>
+            </html>
+            """, 
+            customerName,
+            networkProvider,
+            productType,
+            iccid != null ? iccid : "N/A",
+            qrCodeImage,
+            supportEmail, 
+            supportEmail,
+            appName
+        );
+    }
+
+    /**
+     * Generate eSIM QR code email HTML with inline CID attachment (better email client compatibility)
+     */
+    private String generateEsimQrCodeHtmlWithCid(String customerName, String networkProvider, 
+                                                 String productType, String iccid) {
+        return String.format("""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Your eSIM QR Code</title>
+            </head>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
+                <div style="background: linear-gradient(135deg, #06b6d4 0%%, #0891b2 100%%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+                    <h1 style="color: white; margin: 0; font-size: 28px;">📱 Your eSIM QR Code</h1>
+                </div>
+                
+                <div style="background: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <h2 style="color: #333; margin-bottom: 20px;">Hi %s,</h2>
+                    
+                    <p style="margin-bottom: 20px;">
+                        Thank you for your purchase! Your eSIM QR code is ready to use.
+                    </p>
+                    
+                    <div style="background: #f0f9ff; border: 2px solid #bae6fd; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                        <h3 style="margin-top: 0; color: #0c4a6e;">📋 eSIM Details</h3>
+                        <p style="margin: 5px 0;"><strong>Network Provider:</strong> %s</p>
+                        <p style="margin: 5px 0;"><strong>Product Type:</strong> %s</p>
+                        <p style="margin: 5px 0;"><strong>ICCID:</strong> %s</p>
+                    </div>
+                    
+                    <div style="background: #f9fafb; border: 2px solid #e5e7eb; padding: 20px; border-radius: 8px; margin: 20px 0; text-align: center;">
+                        <h3 style="margin-top: 0; color: #1f2937;">📱 Scan this QR Code</h3>
+                        <img src="cid:qrcode" alt="eSIM QR Code" style="display: block; width: 250px; height: 250px; margin: 20px auto; border: 2px solid #e5e7eb; border-radius: 12px; padding: 10px; background: white;" />
+                        <p style="color: #6b7280; font-size: 14px; margin-top: 15px; font-style: italic;">
+                            Point your device's camera at the QR code to install the eSIM
+                        </p>
+                    </div>
+                    
+                    <div style="background: #ecfeff; border-left: 4px solid #06b6d4; padding: 15px; margin: 20px 0; border-radius: 5px;">
+                        <h3 style="margin-top: 0; color: #155e75;">📝 How to Install</h3>
+                        <ol style="color: #164e63; margin: 10px 0; padding-left: 20px;">
+                            <li style="margin: 8px 0;">Go to <strong>Settings</strong> on your device</li>
+                            <li style="margin: 8px 0;">Navigate to <strong>Mobile Data / Cellular</strong></li>
+                            <li style="margin: 8px 0;">Select <strong>Add eSIM</strong> or <strong>Add Mobile Plan</strong></li>
+                            <li style="margin: 8px 0;">Scan the QR code above</li>
+                            <li style="margin: 8px 0;">Follow the on-screen instructions to complete setup</li>
+                        </ol>
+                    </div>
+                    
+                    <div style="background: #fef3c7; border: 2px solid #fde68a; padding: 15px; margin: 20px 0; border-radius: 8px;">
+                        <p style="margin: 0; color: #92400e;">
+                            <strong>⚠️ Important:</strong> Don't delete this eSIM after installation. Keep this email for your records.
+                        </p>
+                    </div>
+                    
+                    <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+                    
+                    <p style="color: #6b7280; font-size: 14px; text-align: center; margin: 0;">
+                        Need help? Contact us at <a href="mailto:%s" style="color: #06b6d4; text-decoration: none;">%s</a>
+                    </p>
+                </div>
+                
+                <div style="text-align: center; padding: 20px; color: #9ca3af; font-size: 12px;">
+                    <p style="margin: 5px 0;">&copy; 2026 %s. All rights reserved.</p>
+                </div>
+            </body>
+            </html>
+            """, 
+            customerName,
+            networkProvider,
+            productType,
+            iccid != null ? iccid : "N/A",
+            supportEmail, 
+            supportEmail,
+            appName
         );
     }
 

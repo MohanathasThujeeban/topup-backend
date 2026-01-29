@@ -2529,6 +2529,9 @@ public class AdminService {
                     if (!iccids.isEmpty()) {
                         sale.put("iccid", iccids.get(0));
                     }
+                    
+                    // QR Code URL
+                    sale.put("qrCodeUrl", posSale.getQrCodeUrl());
 
                     sales.add(sale);
                     System.out.println("  ✅ Added POS sale with delivery method: " + deliveryMethod);

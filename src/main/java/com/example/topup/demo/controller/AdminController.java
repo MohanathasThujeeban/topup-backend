@@ -1,31 +1,49 @@
 package com.example.topup.demo.controller;
 
-import com.example.topup.demo.service.AdminService;
-import com.example.topup.demo.entity.User;
-import com.example.topup.demo.entity.EsimPosSale;
-import com.example.topup.demo.entity.StockPool;
-import com.example.topup.demo.entity.Product;
-import com.example.topup.demo.repository.UserRepository;
-import com.example.topup.demo.repository.EsimPosSaleRepository;
-import com.example.topup.demo.repository.StockPoolRepository;
-import com.example.topup.demo.repository.ProductRepository;
-import com.example.topup.demo.dto.RetailerCreditLimitDTO;
-import com.example.topup.demo.dto.UpdateCreditLimitRequest;
-import com.example.topup.demo.dto.UpdateUnitLimitRequest;
-import com.example.topup.demo.dto.UpdateMarginRateRequest;
-import com.example.topup.demo.dto.UpdateKickbackLimitRequest;
-import com.example.topup.demo.dto.RetailerKickbackLimitDTO;
-import jakarta.validation.Valid;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Collectors;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
-import java.util.*;
-import java.util.stream.Collectors;
+import com.example.topup.demo.dto.RetailerCreditLimitDTO;
+import com.example.topup.demo.dto.RetailerKickbackLimitDTO;
+import com.example.topup.demo.dto.UpdateCreditLimitRequest;
+import com.example.topup.demo.dto.UpdateKickbackLimitRequest;
+import com.example.topup.demo.dto.UpdateMarginRateRequest;
+import com.example.topup.demo.dto.UpdateUnitLimitRequest;
+import com.example.topup.demo.entity.EsimPosSale;
+import com.example.topup.demo.entity.Product;
+import com.example.topup.demo.entity.StockPool;
+import com.example.topup.demo.entity.User;
+import com.example.topup.demo.repository.EsimPosSaleRepository;
+import com.example.topup.demo.repository.ProductRepository;
+import com.example.topup.demo.repository.StockPoolRepository;
+import com.example.topup.demo.repository.UserRepository;
+import com.example.topup.demo.service.AdminService;
+import com.example.topup.demo.service.StockService;
+
+import jakarta.validation.Valid;
 
 @RestController
 @RequestMapping("/api/admin")
@@ -48,6 +66,9 @@ public class AdminController {
     
     @Autowired
     private ProductRepository productRepository;
+    
+    @Autowired
+    private StockService stockService;
 
     /**
      * Test endpoint to verify admin controller is working
@@ -1063,6 +1084,128 @@ public class AdminController {
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", "Error fixing network providers: " + e.getMessage());
+            return ResponseEntity.status(500).body(error);
+        }
+    }
+    
+    /**
+     * Backfill QR codes for existing eSIM POS sales
+     * This endpoint retrieves QR codes from stock items and updates existing sales records
+     */
+    @PostMapping("/backfill-qr-codes")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Map<String, Object>> backfillQrCodes() {
+        System.out.println("\n🔄 ===== Starting QR Code Backfill =====");
+        
+        try {
+            // Get all eSIM POS sales without QR codes
+            List<EsimPosSale> allSales = esimPosSaleRepository.findAll();
+            
+            int totalSales = allSales.size();
+            int updated = 0;
+            int skipped = 0;
+            int notFound = 0;
+            
+            System.out.println("📊 Found " + totalSales + " total POS sales");
+            
+            for (EsimPosSale sale : allSales) {
+                // Skip if QR code already exists
+                if (sale.getQrCodeUrl() != null && !sale.getQrCodeUrl().isEmpty()) {
+                    skipped++;
+                    continue;
+                }
+                
+                // Skip if no ICCID
+                if (sale.getIccid() == null || sale.getIccid().isEmpty()) {
+                    System.out.println("⚠️ Sale " + sale.getId() + " has no ICCID, skipping");
+                    notFound++;
+                    continue;
+                }
+                
+                try {
+                    // Find the stock pool
+                    String poolId = sale.getStockPoolId();
+                    if (poolId == null || poolId.isEmpty()) {
+                        System.out.println("⚠️ Sale " + sale.getId() + " has no pool ID, skipping");
+                        notFound++;
+                        continue;
+                    }
+                    
+                    Optional<StockPool> poolOpt = stockPoolRepository.findById(poolId);
+                    if (!poolOpt.isPresent()) {
+                        System.out.println("⚠️ Pool not found for sale " + sale.getId());
+                        notFound++;
+                        continue;
+                    }
+                    
+                    StockPool pool = poolOpt.get();
+                    
+                    // Find the item by ICCID (serial number) in all items
+                    StockPool.StockItem foundItem = null;
+                    if (pool.getItems() != null) {
+                        for (StockPool.StockItem item : pool.getItems()) {
+                            if (sale.getIccid().equals(item.getSerialNumber())) {
+                                foundItem = item;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (foundItem == null) {
+                        System.out.println("⚠️ Item with ICCID " + sale.getIccid() + " not found in pool");
+                        notFound++;
+                        continue;
+                    }
+                    
+                    // Get and decrypt QR code
+                    if (foundItem.getQrCodeImage() != null && !foundItem.getQrCodeImage().isEmpty()) {
+                        try {
+                            String decryptedQr = stockService.decryptData(foundItem.getQrCodeImage());
+                            String qrDataUrl = "data:image/png;base64," + decryptedQr;
+                            
+                            sale.setQrCodeUrl(qrDataUrl);
+                            esimPosSaleRepository.save(sale);
+                            
+                            updated++;
+                            System.out.println("✅ Updated sale " + sale.getId() + " with QR code (ICCID: " + sale.getIccid() + ")");
+                        } catch (Exception decryptEx) {
+                            System.err.println("⚠️ Failed to decrypt QR for sale " + sale.getId() + ": " + decryptEx.getMessage());
+                            notFound++;
+                        }
+                    } else {
+                        System.out.println("⚠️ No QR code image found for item " + foundItem.getSerialNumber());
+                        notFound++;
+                    }
+                    
+                } catch (Exception itemEx) {
+                    System.err.println("⚠️ Error processing sale " + sale.getId() + ": " + itemEx.getMessage());
+                    notFound++;
+                }
+            }
+            
+            System.out.println("\n✅ QR Code Backfill Complete:");
+            System.out.println("   Total Sales: " + totalSales);
+            System.out.println("   Updated: " + updated);
+            System.out.println("   Skipped (already had QR): " + skipped);
+            System.out.println("   Not Found/Failed: " + notFound);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", "QR code backfill completed");
+            response.put("totalSales", totalSales);
+            response.put("updated", updated);
+            response.put("skipped", skipped);
+            response.put("notFound", notFound);
+            
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error during QR backfill: " + e.getMessage());
+            e.printStackTrace();
+            
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", "Error during QR backfill: " + e.getMessage());
             return ResponseEntity.status(500).body(error);
         }
     }

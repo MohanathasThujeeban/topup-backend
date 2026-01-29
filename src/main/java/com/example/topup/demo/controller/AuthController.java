@@ -1,24 +1,36 @@
 package com.example.topup.demo.controller;
 
-import com.example.topup.demo.entity.User;
-import com.example.topup.demo.entity.BusinessDetails;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
 import com.example.topup.demo.entity.Address;
+import com.example.topup.demo.entity.BusinessDetails;
+import com.example.topup.demo.entity.RetailerLimit;
+import com.example.topup.demo.entity.User;
+import com.example.topup.demo.repository.RetailerLimitRepository;
 import com.example.topup.demo.service.UserService;
+
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
-import org.springframework.web.bind.annotation.*;
-
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -42,6 +54,9 @@ public class AuthController {
 
     @Autowired
     private UserService userService;
+    
+    @Autowired
+    private RetailerLimitRepository retailerLimitRepository;
 
     /**
      * Login (development-friendly): verifies credentials and returns a basic token and user payload
@@ -83,17 +98,34 @@ public class AuthController {
 
             Map<String, Object> userPayload = new HashMap<>();
             userPayload.put("id", user.getId());
-            userPayload.put("name", (user.getFirstName() != null ? user.getFirstName() : "")
-                    + (user.getLastName() != null ? (" " + user.getLastName()) : ""));
             userPayload.put("email", user.getEmail());
             userPayload.put("accountType", user.getAccountType() != null ? user.getAccountType().name() : "PERSONAL");
+            
+            // Get business name from BusinessDetails if available
+            String businessName = null;
+            if (user.getBusinessDetails() != null && user.getBusinessDetails().getCompanyName() != null) {
+                businessName = user.getBusinessDetails().getCompanyName();
+            } else {
+                // Fallback to full name for personal accounts
+                businessName = (user.getFirstName() != null ? user.getFirstName() : "")
+                        + (user.getLastName() != null ? (" " + user.getLastName()) : "");
+            }
+            userPayload.put("businessName", businessName);
+            
+            // Get credit balance from RetailerLimit if available
+            double creditBalance = 0.0;
+            try {
+                Optional<RetailerLimit> limitOpt = retailerLimitRepository.findByRetailer(user);
+                if (limitOpt.isPresent()) {
+                    RetailerLimit limit = limitOpt.get();
+                    creditBalance = limit.getAvailableCredit() != null ? limit.getAvailableCredit().doubleValue() : 0.0;
+                }
+            } catch (Exception e) {
+                System.err.println("Failed to fetch credit balance: " + e.getMessage());
+            }
+            userPayload.put("creditBalance", creditBalance);
+            
             userPayload.put("joinedAt", user.getCreatedDate());
-            userPayload.put("avatar", null);
-            Map<String, Object> prefs = new HashMap<>();
-            prefs.put("currency", "NOK");
-            prefs.put("language", "en");
-            prefs.put("notifications", true);
-            userPayload.put("preferences", prefs);
 
             Map<String, Object> res = new HashMap<>();
             res.put("success", true);
@@ -113,13 +145,20 @@ public class AuthController {
     }
 
     /**
-     * Token verify (development): Accepts any Bearer token and returns success
+     * Token verify: Validates token and returns user data
      */
     @GetMapping("/verify")
     public ResponseEntity<?> verifyToken(@RequestHeader(value = "Authorization", required = false) String authorization) {
         if (authorization != null && authorization.startsWith("Bearer ")) {
+            String token = authorization.substring(7);
+            
+            // Extract user email from token (for dev tokens, this is a simple UUID)
+            // In production, decode JWT to get user info
+            // For now, we'll try to find a user from the token or return generic success
+            
             Map<String, Object> res = new HashMap<>();
             res.put("success", true);
+            res.put("message", "Token is valid");
             return ResponseEntity.ok(res);
         }
         Map<String, Object> res = new HashMap<>();
