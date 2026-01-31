@@ -206,6 +206,24 @@ public class EmailService {
     }
 
     /**
+     * Send support form enquiry confirmation email
+     */
+    public void sendEnquiryConfirmationEmail(String toEmail, String customerName, String category) {
+        try {
+            String htmlContent = generateSupportEnquiryConfirmationHtml(customerName, category);
+            
+            sendHtmlEmail(
+                toEmail,
+                "We've Received Your Support Request - " + appName,
+                htmlContent
+            );
+        } catch (Exception e) {
+            log.error("Failed to send enquiry confirmation email", e);
+            throw new RuntimeException("Failed to send enquiry confirmation email", e);
+        }
+    }
+
+    /**
      * Send business pending review email
      */
     public void sendBusinessUnderReviewEmail(String toEmail, String businessName) {
@@ -1809,5 +1827,126 @@ a:hover{text-decoration:underline}
             log.error("❌ Failed to send eSIM QR code email to {}: {}", toEmail, e.getMessage());
             throw new RuntimeException("Failed to send eSIM QR code email", e);
         }
+    }
+
+    /**
+     * Generate HTML for support form enquiry confirmation email with eSIM/ePIN icons
+     */
+    private String generateSupportEnquiryConfirmationHtml(String customerName, String category) {
+        return String.format("""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Support Request Received</title>
+            </head>
+            <body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 650px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
+                
+                <!-- Header -->
+                <div style="background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); padding: 40px 30px; text-align: center; border-radius: 15px 15px 0 0; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                    <h1 style="color: white; margin: 0; font-size: 32px; font-weight: 700; text-shadow: 0 2px 4px rgba(0,0,0,0.2);">✅ We've Got Your Message!</h1>
+                    <p style="color: rgba(255,255,255,0.95); margin: 15px 0 0 0; font-size: 16px;">Your support request has been received</p>
+                </div>
+                
+                <!-- Main Content -->
+                <div style="background: #ffffff; padding: 40px 35px; border-radius: 0 0 15px 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                    <h2 style="color: #333; margin-bottom: 25px; font-size: 24px;">Hi %s! 👋</h2>
+                    
+                    <p style="margin-bottom: 25px; font-size: 16px; color: #555;">
+                        Thank you for reaching out to <strong>%s</strong>. We've received your support request and our team will get back to you shortly.
+                    </p>
+                    
+                    <!-- Request Details Box -->
+                    <div style="background: linear-gradient(135deg, #e3f2fd 0%%, #bbdefb 100%%); border-left: 5px solid #2196F3; padding: 25px; border-radius: 10px; margin: 30px 0;">
+                        <h3 style="margin-top: 0; color: #1976d2; font-size: 20px; display: flex; align-items: center;">
+                            📋 <span style="margin-left: 10px;">Request Details</span>
+                        </h3>
+                        <p style="margin: 12px 0; color: #1565c0; font-size: 15px;">
+                            <strong>Category:</strong> %s
+                        </p>
+                        <p style="margin: 12px 0; color: #1565c0; font-size: 15px;">
+                            <strong>Status:</strong> <span style="background: #4caf50; color: white; padding: 4px 12px; border-radius: 20px; font-size: 13px;">Received</span>
+                        </p>
+                        <p style="margin: 12px 0; color: #1565c0; font-size: 15px;">
+                            <strong>Expected Response Time:</strong> Within 24 hours
+                        </p>
+                    </div>
+                    
+                    <!-- Icons Section -->
+                    <div style="text-align: center; margin: 40px 0; padding: 30px; background: linear-gradient(135deg, #f8f9fa 0%%, #e9ecef 100%%); border-radius: 15px;">
+                        <p style="margin: 0 0 25px 0; color: #666; font-size: 15px; font-weight: 600;">We provide support for all your needs:</p>
+                        <div style="display: flex; justify-content: center; align-items: center; gap: 60px; flex-wrap: wrap;">
+                            <!-- eSIM Icon -->
+                            <div style="text-align: center;">
+                                <div style="width: 100px; height: 100px; background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); border-radius: 20px; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px; box-shadow: 0 6px 12px rgba(102, 126, 234, 0.3);">
+                                    <svg width="60" height="60" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <rect x="5" y="3" width="14" height="18" rx="2" stroke="white" stroke-width="2"/>
+                                        <path d="M9 7h6M9 11h6M9 15h4" stroke="white" stroke-width="2" stroke-linecap="round"/>
+                                        <circle cx="12" cy="18" r="1" fill="white"/>
+                                    </svg>
+                                </div>
+                                <p style="margin: 0; color: #667eea; font-weight: 700; font-size: 16px;">eSIM Products</p>
+                                <p style="margin: 5px 0 0 0; color: #999; font-size: 13px;">Digital Connectivity</p>
+                            </div>
+                            
+                            <!-- ePIN Icon -->
+                            <div style="text-align: center;">
+                                <div style="width: 100px; height: 100px; background: linear-gradient(135deg, #f093fb 0%%, #f5576c 100%%); border-radius: 20px; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px; box-shadow: 0 6px 12px rgba(245, 87, 108, 0.3);">
+                                    <svg width="60" height="60" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <rect x="4" y="8" width="16" height="11" rx="2" stroke="white" stroke-width="2"/>
+                                        <path d="M8 8V6C8 3.79086 9.79086 2 12 2C14.2091 2 16 3.79086 16 6V8" stroke="white" stroke-width="2"/>
+                                        <circle cx="12" cy="14" r="2" fill="white"/>
+                                        <path d="M12 16V17" stroke="white" stroke-width="2" stroke-linecap="round"/>
+                                    </svg>
+                                </div>
+                                <p style="margin: 0; color: #f5576c; font-weight: 700; font-size: 16px;">ePIN Codes</p>
+                                <p style="margin: 5px 0 0 0; color: #999; font-size: 13px;">Instant Top-ups</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- What's Next Section -->
+                    <div style="background: #f8f9fa; border: 2px dashed #dee2e6; padding: 25px; border-radius: 10px; margin: 30px 0;">
+                        <h3 style="margin-top: 0; color: #495057; font-size: 18px;">⏱️ What Happens Next?</h3>
+                        <ul style="color: #6c757d; padding-left: 20px; margin: 15px 0 0 0; font-size: 15px;">
+                            <li style="margin-bottom: 12px;">Our support team will review your request</li>
+                            <li style="margin-bottom: 12px;">You'll receive a response within <strong>24 hours</strong></li>
+                            <li style="margin-bottom: 12px;">Check your email for updates from our team</li>
+                            <li style="margin-bottom: 0;">For urgent matters, contact us directly below</li>
+                        </ul>
+                    </div>
+                    
+                    <!-- Contact Information -->
+                    <div style="text-align: center; margin: 35px 0 25px 0; padding: 25px; background: linear-gradient(135deg, #fff5f5 0%%, #fee 100%%); border-radius: 10px;">
+                        <h3 style="margin: 0 0 20px 0; color: #d32f2f; font-size: 18px;">📞 Need Immediate Help?</h3>
+                        <p style="margin: 8px 0; color: #666; font-size: 15px;">
+                            <strong>Email:</strong> <a href="mailto:%s" style="color: #667eea; text-decoration: none; font-weight: 600;">%s</a>
+                        </p>
+                        <p style="margin: 8px 0; color: #666; font-size: 15px;">
+                            <strong>Website:</strong> <a href="%s" style="color: #667eea; text-decoration: none; font-weight: 600;">%s</a>
+                        </p>
+                    </div>
+                    
+                    <hr style="border: none; border-top: 2px solid #e9ecef; margin: 35px 0;">
+                    
+                    <!-- Footer Message -->
+                    <p style="color: #868e96; font-size: 14px; text-align: center; margin: 0; line-height: 1.8;">
+                        Thank you for choosing <strong>%s</strong>! We're here to help you with all your eSIM and ePIN needs. 🚀
+                    </p>
+                </div>
+                
+                <!-- Email Footer -->
+                <div style="text-align: center; padding: 25px; color: #adb5bd; font-size: 13px;">
+                    <p style="margin: 0 0 10px 0;">© 2024 %s. All rights reserved.</p>
+                    <p style="margin: 0;">This is an automated message. Please do not reply directly to this email.</p>
+                </div>
+            </body>
+            </html>
+            """, 
+            customerName, appName, category, 
+            supportEmail, supportEmail, appUrl, appUrl, 
+            appName, appName
+        );
     }
 }
