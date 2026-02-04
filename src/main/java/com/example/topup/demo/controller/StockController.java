@@ -997,30 +997,34 @@ public class StockController {
             
             // Send email only if skipEmail is false
             if (!skipEmail) {
-                System.out.println("📤 Sending professional eSIM activation email to: " + customerEmail);
+                System.out.println("📤 Sending eSIM QR code email to: " + customerEmail);
                 System.out.println("   - Product: " + pool.getName());
+                System.out.println("   - Network Provider: " + pool.getNetworkProvider());
                 System.out.println("   - ICCID: " + iccid);
                 System.out.println("   - Price: " + priceStr + " NOK");
                 System.out.println("   - Has QR Code: " + (qrCodeBase64 != null && !qrCodeBase64.isEmpty()));
                 System.out.println("   - QR Code Length: " + (qrCodeBase64 != null ? qrCodeBase64.length() : 0));
-                if (qrCodeBase64 != null && qrCodeBase64.length() > 0) {
-                    System.out.println("   - QR Code Starts With: " + qrCodeBase64.substring(0, Math.min(50, qrCodeBase64.length())));
-                    System.out.println("   - Is Valid PNG: " + qrCodeBase64.startsWith("iVBORw0KGgo"));
-                } else {
-                    System.out.println("   - ❌ QR CODE IS NULL OR EMPTY - EMAIL WILL NOT HAVE QR CODE!");
+                
+                // Parse customer name into first and last name
+                String firstName = "";
+                String lastName = "";
+                if (customerName != null && !customerName.isEmpty()) {
+                    String[] nameParts = customerName.trim().split("\\s+", 2);
+                    firstName = nameParts[0];
+                    lastName = nameParts.length > 1 ? nameParts[1] : "";
                 }
-                System.out.println("   - Has Activation Code: " + (decryptedActivationCode != null && !decryptedActivationCode.isEmpty()));
-                emailService.sendEsimApprovalEmail(
+                
+                // Use the same email method as POS app for consistent template
+                emailService.sendEsimQrCodeEmail(
                     customerEmail,
-                    customerName,
-                    orderId,
-                    iccid,
+                    firstName,
+                    lastName,
+                    pool.getNetworkProvider() != null ? pool.getNetworkProvider() : "Network Provider",
+                    "eSIM",
                     qrCodeBase64,
-                    decryptedActivationCode,
-                    smDpAddress,
-                    priceStr + " NOK"
+                    iccid
                 );
-                System.out.println("✅ Professional email sent successfully with embedded QR code and price");
+                System.out.println("✅ eSIM QR code email sent successfully with modern template");
             } else {
                 System.out.println("⏭️ Skipping email send (skipEmail=true) - POS Print mode");
             }

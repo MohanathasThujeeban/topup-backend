@@ -46,6 +46,9 @@ public interface RetailerOrderRepository extends MongoRepository<RetailerOrder, 
     List<RetailerOrder> findByRetailerIdAndCreatedDateBetween(String retailerId, LocalDateTime startDate, LocalDateTime endDate);
     Page<RetailerOrder> findByRetailerIdAndCreatedDateBetween(String retailerId, LocalDateTime startDate, LocalDateTime endDate, Pageable pageable);
     
+    // Find by retailer, status and date after
+    List<RetailerOrder> findByRetailerIdAndStatusAndCreatedDateAfter(String retailerId, OrderStatus status, LocalDateTime startDate);
+    
     // Find pending orders older than specified date
     @Query("{'status': 'PENDING', 'createdDate': {$lt: ?0}}")
     List<RetailerOrder> findPendingOrdersOlderThan(LocalDateTime date);

@@ -1675,9 +1675,23 @@ public class AdminService {
     }
     
     /**
+     * Get all products from stock
+     */
+    public List<Product> getAllProductsFromStock() {
+        return productRepository.findAll();
+    }
+    
+    /**
      * Get retailer's sales details with eSIM and ePIN information
      */
     public Map<String, Object> getRetailerSalesDetails(String retailerId) {
+        return getRetailerSalesDetails(retailerId, null, null);
+    }
+    
+    /**
+     * Get retailer's sales details with eSIM and ePIN information filtered by date range
+     */
+    public Map<String, Object> getRetailerSalesDetails(String retailerId, String fromDate, String toDate) {
         Map<String, Object> salesDetails = new HashMap<>();
         
         try {
@@ -1691,6 +1705,35 @@ public class AdminService {
             
             // Get all orders for this retailer
             List<RetailerOrder> orders = retailerOrderRepository.findByRetailerIdOrderByCreatedDateDesc(retailerId);
+            
+            // Filter orders by date if fromDate or toDate is provided
+            if (fromDate != null || toDate != null) {
+                java.time.LocalDateTime fromDateTime = null;
+                java.time.LocalDateTime toDateTime = null;
+                
+                if (fromDate != null && !fromDate.isEmpty()) {
+                    fromDateTime = java.time.LocalDate.parse(fromDate).atStartOfDay();
+                }
+                if (toDate != null && !toDate.isEmpty()) {
+                    toDateTime = java.time.LocalDate.parse(toDate).atTime(23, 59, 59);
+                }
+                
+                final java.time.LocalDateTime finalFromDateTime = fromDateTime;
+                final java.time.LocalDateTime finalToDateTime = toDateTime;
+                
+                orders = orders.stream()
+                    .filter(order -> {
+                        if (order.getCreatedDate() == null) return false;
+                        
+                        boolean afterFrom = finalFromDateTime == null || 
+                            !order.getCreatedDate().isBefore(finalFromDateTime);
+                        boolean beforeTo = finalToDateTime == null || 
+                            !order.getCreatedDate().isAfter(finalToDateTime);
+                        
+                        return afterFrom && beforeTo;
+                    })
+                    .collect(java.util.stream.Collectors.toList());
+            }
             
             List<Map<String, Object>> ordersList = new ArrayList<>();
             
@@ -2430,6 +2473,21 @@ public class AdminService {
                     }
 
                     System.out.println("Processing POS sale: " + posSale.getId() + ", product: " + posSale.getProductName());
+                    
+                    // *** CRITICAL FIX: Filter out ePIN products that don't have ICCID ***
+                    // eSIM products MUST have an ICCID. If ICCID is missing or empty, it's likely an ePIN product.
+                    String iccid = posSale.getIccid();
+                    if (iccid == null || iccid.trim().isEmpty() || iccid.equals("-")) {
+                        System.out.println("  ⚠️ SKIPPING: No ICCID found - likely an ePIN product, not eSIM");
+                        continue; // Skip this item - it's not a real eSIM sale
+                    }
+                    
+                    // Additional validation: Check if product name suggests it's an ePIN (e.g., "lyca 50", "lyca 19")
+                    String productName = posSale.getProductName() != null ? posSale.getProductName().toLowerCase() : "";
+                    if (productName.matches(".*(bundle|epin|topup|recharge|voucher).*") && !productName.contains("esim")) {
+                        System.out.println("  ⚠️ SKIPPING: Product name suggests ePIN product: " + posSale.getProductName());
+                        continue; // Skip products that are clearly ePINs
+                    }
 
                     try {
                         int quantity = 1; // POS sales are always 1 eSIM at a time

@@ -103,44 +103,83 @@ public class RetailerService {
         return orderRepository.save(order);
     }
 
-    // Get analytics for a retailer
+    // Get analytics for a retailer (with default lifetime period)
     public Map<String, Object> getRetailerAnalytics(User retailer) {
+        return getRetailerAnalytics(retailer, "lifetime");
+    }
+    
+    // Get analytics for a retailer with time period filter
+    public Map<String, Object> getRetailerAnalytics(User retailer, String period) {
         Map<String, Object> analytics = new HashMap<>();
         
         // Get current month data
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime startOfMonth = now.withDayOfMonth(1).withHour(0).withMinute(0).withSecond(0);
         LocalDateTime startOfLastMonth = startOfMonth.minusMonths(1);
+        LocalDateTime startOfToday = now.withHour(0).withMinute(0).withSecond(0).withNano(0);
+        
+        // Determine date range based on period
+        LocalDateTime periodStart = null;
+        if ("today".equalsIgnoreCase(period)) {
+            periodStart = startOfToday;
+        } else if ("thisMonth".equalsIgnoreCase(period)) {
+            periodStart = startOfMonth;
+        }
+        // For "lifetime", periodStart remains null (no filter)
         
         // Get POS sales from RetailerOrder (new system)
-        List<RetailerOrder> posSales = retailerOrderRepository.findByRetailerIdAndStatus(
-            retailer.getId(), RetailerOrder.OrderStatus.COMPLETED);
+        List<RetailerOrder> posSales;
+        if (periodStart != null) {
+            posSales = retailerOrderRepository.findByRetailerIdAndStatusAndCreatedDateAfter(
+                retailer.getId(), RetailerOrder.OrderStatus.COMPLETED, periodStart);
+        } else {
+            posSales = retailerOrderRepository.findByRetailerIdAndStatus(
+                retailer.getId(), RetailerOrder.OrderStatus.COMPLETED);
+        }
         
         // Total orders - count from both old Order table and new RetailerOrder (POS) table
-        long oldSystemOrders = orderRepository.countByRetailer(retailer);
+        long oldSystemOrders;
+        if (periodStart != null) {
+            oldSystemOrders = orderRepository.countByRetailerAndDateRange(retailer, periodStart, now);
+        } else {
+            oldSystemOrders = orderRepository.countByRetailer(retailer);
+        }
         long posSystemOrders = posSales.size();
         long totalOrders = oldSystemOrders + posSystemOrders;
         analytics.put("totalOrders", totalOrders);
         
-        // Pending orders
+        // Pending orders (always show total pending regardless of period)
         long pendingOrders = orderRepository.countByRetailerAndStatus(retailer, OrderStatus.PENDING);
         analytics.put("pendingOrders", pendingOrders);
         
-        // Calculate total revenue from retailer's used credit (this is the actual lifetime revenue)
-        // Every sale deducts from credit, so usedCredit = total earnings
+        // Calculate total revenue based on period
         BigDecimal totalRevenue = BigDecimal.ZERO;
-        Optional<RetailerLimit> limitOpt = retailerLimitRepository.findByRetailer(retailer);
-        if (limitOpt.isPresent()) {
-            RetailerLimit limit = limitOpt.get();
-            if (limit.getUsedCredit() != null) {
-                totalRevenue = limit.getUsedCredit();
+        if (periodStart == null) {
+            // Lifetime: use retailer's total used credit
+            Optional<RetailerLimit> limitOpt = retailerLimitRepository.findByRetailer(retailer);
+            if (limitOpt.isPresent()) {
+                RetailerLimit limit = limitOpt.get();
+                if (limit.getUsedCredit() != null) {
+                    totalRevenue = limit.getUsedCredit();
+                }
             }
+        } else {
+            // Today or This Month: calculate from actual sales in the period
+            totalRevenue = posSales.stream()
+                .map(RetailerOrder::getTotalAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
         }
         analytics.put("totalRevenue", totalRevenue);
         
         // Get old orders for customer sales count
-        List<Order> soldOrders = orderRepository.findByRetailerAndStatusOrderByCreatedDateDesc(
-            retailer, OrderStatus.SOLD);
+        List<Order> soldOrders;
+        if (periodStart != null) {
+            soldOrders = orderRepository.findByRetailerAndStatusAndDateRange(
+                retailer, OrderStatus.SOLD, periodStart, now);
+        } else {
+            soldOrders = orderRepository.findByRetailerAndStatusOrderByCreatedDateDesc(
+                retailer, OrderStatus.SOLD);
+        }
         
         // Add customer sales count (POS transactions from both systems)
         long customerSales = soldOrders.size() + posSales.size();
@@ -192,11 +231,32 @@ public class RetailerService {
         analytics.put("esimEarnings", esimEarnings);
         analytics.put("epinEarnings", epinEarnings);
         
-        // Get profit from RetailerProfit records (all yearly records to calculate total)
-        List<RetailerProfit> profits = profitRepository.findByRetailer_IdAndPeriod(retailer.getId(), "yearly");
-        BigDecimal totalProfit = profits.stream()
-            .map(RetailerProfit::getProfit)
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
+        // Calculate profit based on period
+        BigDecimal totalProfit = BigDecimal.ZERO;
+        if (periodStart == null) {
+            // Lifetime: Get all yearly records to calculate total profit
+            List<RetailerProfit> profits = profitRepository.findByRetailer_IdAndPeriod(retailer.getId(), "yearly");
+            totalProfit = profits.stream()
+                .map(RetailerProfit::getProfit)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        } else {
+            // Today or This Month: Get profit from daily/monthly records
+            List<RetailerProfit> profits;
+            if ("today".equalsIgnoreCase(period)) {
+                // Get today's profit from daily records
+                LocalDate today = LocalDate.now();
+                Optional<RetailerProfit> todayProfit = profitRepository.findByRetailer_IdAndDateAndPeriod(
+                    retailer.getId(), today, "daily");
+                totalProfit = todayProfit.map(RetailerProfit::getProfit).orElse(BigDecimal.ZERO);
+            } else {
+                // Get this month's profit from monthly records
+                int currentYear = now.getYear();
+                int currentMonth = now.getMonthValue();
+                Optional<RetailerProfit> monthProfit = profitRepository.findByRetailer_IdAndYearAndMonthAndPeriod(
+                    retailer.getId(), currentYear, currentMonth, "monthly");
+                totalProfit = monthProfit.map(RetailerProfit::getProfit).orElse(BigDecimal.ZERO);
+            }
+        }
         analytics.put("totalProfit", totalProfit);
         
         // Monthly growth calculation

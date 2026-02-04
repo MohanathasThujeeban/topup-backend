@@ -180,8 +180,14 @@ public class PromotionController {
         Map<String, Object> response = new HashMap<>();
         
         try {
-            User admin = (User) authentication.getPrincipal();
-            Promotion updatedPromotion = promotionService.updatePromotion(id, promotion, admin.getId());
+            // Get admin ID from authentication or use default for development
+            String adminId = "admin";
+            if (authentication != null && authentication.getPrincipal() instanceof User) {
+                User admin = (User) authentication.getPrincipal();
+                adminId = admin.getId();
+            }
+            
+            Promotion updatedPromotion = promotionService.updatePromotion(id, promotion, adminId);
             
             response.put("success", true);
             response.put("message", "Promotion updated successfully");

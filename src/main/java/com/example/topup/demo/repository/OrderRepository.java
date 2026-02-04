@@ -22,6 +22,10 @@ public interface OrderRepository extends MongoRepository<Order, String> {
     // Find orders by retailer and status
     List<Order> findByRetailerAndStatusOrderByCreatedDateDesc(User retailer, OrderStatus status);
     
+    // Find orders by retailer, status and date range
+    @Query(value = "{ 'retailer': ?0, 'status': ?1, 'createdDate': { $gte: ?2, $lte: ?3 } }")
+    List<Order> findByRetailerAndStatusAndDateRange(User retailer, OrderStatus status, LocalDateTime startDate, LocalDateTime endDate);
+    
     // Find orders by retailer within date range
     List<Order> findByRetailerAndCreatedDateBetweenOrderByCreatedDateDesc(
         User retailer, LocalDateTime startDate, LocalDateTime endDate);

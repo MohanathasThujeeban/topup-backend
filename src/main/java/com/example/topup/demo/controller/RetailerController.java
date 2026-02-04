@@ -10,6 +10,9 @@ import com.example.topup.demo.service.UserService;
 import com.example.topup.demo.service.BundleService;
 import com.example.topup.demo.service.StockService;
 import com.example.topup.demo.service.AdminService;
+import com.example.topup.demo.service.EmailService;
+import com.example.topup.demo.service.KickbackCampaignService;
+import com.example.topup.demo.service.RetailerLimitService;
 import com.example.topup.demo.entity.StockPool;
 import com.example.topup.demo.entity.RetailerLimit;
 import com.example.topup.demo.entity.RetailerKickbackLimit;
@@ -18,6 +21,7 @@ import com.example.topup.demo.repository.OrderRepository;
 import com.example.topup.demo.repository.RetailerLimitRepository;
 import com.example.topup.demo.repository.RetailerKickbackLimitRepository;
 import com.example.topup.demo.repository.StockPoolRepository;
+import com.example.topup.demo.repository.UserRepository;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -72,6 +76,18 @@ public class RetailerController {
 
     @Autowired
     private StockPoolRepository stockPoolRepository;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private EmailService emailService;
+
+    @Autowired
+    private KickbackCampaignService kickbackCampaignService;
+
+    @Autowired
+    private RetailerLimitService retailerLimitService;
 
     // Get all orders for the authenticated retailer
     @GetMapping("/orders")
@@ -252,14 +268,17 @@ public class RetailerController {
 
     // Get retailer analytics
     @GetMapping("/analytics")
-    public ResponseEntity<?> getAnalytics(Authentication authentication) {
+    public ResponseEntity<?> getAnalytics(
+            @RequestParam(required = false, defaultValue = "lifetime") String period,
+            Authentication authentication) {
         try {
             User retailer = getUserFromAuthentication(authentication);
-            Map<String, Object> analytics = retailerService.getRetailerAnalytics(retailer);
+            Map<String, Object> analytics = retailerService.getRetailerAnalytics(retailer, period);
             
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
             response.put("analytics", analytics);
+            response.put("period", period);
             
             return ResponseEntity.ok(response);
         } catch (Exception e) {
@@ -284,14 +303,16 @@ public class RetailerController {
 
     // Get dashboard summary
     @GetMapping("/dashboard")
-    public ResponseEntity<?> getDashboard(Authentication authentication) {
+    public ResponseEntity<?> getDashboard(
+            @RequestParam(required = false, defaultValue = "lifetime") String period,
+            Authentication authentication) {
         try {
             User retailer = getUserFromAuthentication(authentication);
             
             // Get summary data
             List<Order> recentOrders = retailerService.getOrdersByRetailer(retailer);
             List<Product> availableProducts = retailerService.getAvailableProducts();
-            Map<String, Object> analytics = retailerService.getRetailerAnalytics(retailer);
+            Map<String, Object> analytics = retailerService.getRetailerAnalytics(retailer, period);
             
             Map<String, Object> dashboard = new HashMap<>();
             dashboard.put("recentOrders", recentOrders.stream().limit(10).toList());
@@ -1294,11 +1315,14 @@ public class RetailerController {
      * Get retailer's own sales details with serial numbers
      */
     @GetMapping("/sales")
-    public ResponseEntity<Map<String, Object>> getMySales(Authentication authentication) {
+    public ResponseEntity<Map<String, Object>> getMySales(
+            Authentication authentication,
+            @RequestParam(required = false) String fromDate,
+            @RequestParam(required = false) String toDate) {
         try {
             User retailer = getUserFromAuthentication(authentication);
             
-            Map<String, Object> salesData = adminService.getRetailerSalesDetails(retailer.getId());
+            Map<String, Object> salesData = adminService.getRetailerSalesDetails(retailer.getId(), fromDate, toDate);
             
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
@@ -1320,13 +1344,13 @@ public class RetailerController {
     @GetMapping("/esim-sales-report")
     public ResponseEntity<Map<String, Object>> getEsimSalesReport(
             Authentication authentication,
-            @RequestParam(required = false) String startDate,
-            @RequestParam(required = false) String endDate,
+            @RequestParam(required = false) String fromDate,
+            @RequestParam(required = false) String toDate,
             @RequestParam(required = false) String productType) {
         try {
             User retailer = getUserFromAuthentication(authentication);
 
-            Map<String, Object> reportData = adminService.getRetailerEsimSalesReport(retailer.getId(), startDate, endDate, productType);
+            Map<String, Object> reportData = adminService.getRetailerEsimSalesReport(retailer.getId(), fromDate, toDate, productType);
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
@@ -1695,6 +1719,257 @@ public class RetailerController {
             "</div>" +
             "</body>" +
             "</html>";
+    }
+
+    /**
+     * Send eSIM QR code via email - For website (similar to POS app functionality)
+     */
+    @PostMapping("/esims/send-via-email")
+    public ResponseEntity<Map<String, Object>> sendEsimViaEmail(
+            @RequestBody Map<String, Object> requestData,
+            Authentication authentication) {
+        
+        System.out.println("\n📧 ===== Website: Send eSIM via Email Request Received =====");
+        System.out.println("Request data: " + requestData);
+        
+        String retailerEmail = authentication != null ? authentication.getName() : null;
+        if (retailerEmail == null) {
+            System.out.println("⚠️ Authentication is null - falling back to any BUSINESS user for email sale");
+            List<User> businessUsers = userRepository.findByAccountType(User.AccountType.BUSINESS);
+            if (!businessUsers.isEmpty()) {
+                retailerEmail = businessUsers.get(0).getEmail();
+                System.out.println("👉 Using fallback BUSINESS user: " + retailerEmail);
+            } else {
+                retailerEmail = "retailer-web@local";
+                System.out.println("👉 Using retailer web fallback email: " + retailerEmail);
+            }
+        }
+        
+        try {
+            // Extract request parameters
+            String poolId = (String) requestData.get("poolId");
+            String itemId = (String) requestData.get("itemId");
+            String customerFirstName = (String) requestData.get("firstName");
+            String customerLastName = (String) requestData.get("lastName");
+            String customerEmail = (String) requestData.get("email");
+            String networkProvider = (String) requestData.get("networkProvider");
+            String productType = (String) requestData.get("productType");
+            Double price = requestData.get("price") != null ? 
+                ((Number) requestData.get("price")).doubleValue() : 0.0;
+            String productId = (String) requestData.get("productId");
+            String iccid = (String) requestData.get("iccid");
+            
+            // Validate required fields
+            if (poolId == null || itemId == null || customerEmail == null || 
+                customerFirstName == null || customerLastName == null) {
+                throw new IllegalArgumentException("Missing required fields: poolId, itemId, email, firstName, lastName are required");
+            }
+            
+            System.out.println("📋 Website Email Sale Details:");
+            System.out.println("   - Pool ID: " + poolId);
+            System.out.println("   - Item ID: " + itemId);
+            System.out.println("   - Customer: " + customerFirstName + " " + customerLastName);
+            System.out.println("   - Email: " + customerEmail);
+            System.out.println("   - Price: " + price);
+            System.out.println("   - Retailer: " + retailerEmail);
+            
+            // Get the stock pool
+            StockPool pool = stockService.getStockPoolById(poolId);
+            if (pool == null) {
+                throw new IllegalArgumentException("Stock pool not found");
+            }
+            
+            // Find the specific item
+            StockPool.StockItem item = null;
+            for (StockPool.StockItem stockItem : pool.getItems()) {
+                if (stockItem.getItemId().equals(itemId)) {
+                    item = stockItem;
+                    break;
+                }
+            }
+            
+            if (item == null) {
+                throw new IllegalArgumentException("eSIM item not found in stock pool");
+            }
+            
+            // Check if item is available
+            if (item.getStatus() != StockPool.StockItem.ItemStatus.AVAILABLE) {
+                throw new IllegalStateException("eSIM item is not available");
+            }
+            
+            System.out.println("✅ eSIM item found and available");
+            
+            // Get QR code image
+            if (item.getQrCodeImage() == null || item.getQrCodeImage().isEmpty()) {
+                throw new IllegalStateException("QR code not available for this eSIM");
+            }
+            
+            System.out.println("📸 QR Code data - Encrypted length: " + item.getQrCodeImage().length());
+            
+            // Decrypt QR code early to validate
+            String decryptedQr = stockService.decryptData(item.getQrCodeImage());
+            System.out.println("📸 QR Code data - Decrypted length: " + decryptedQr.length());
+            System.out.println("📸 QR Code data - Starts with PNG signature: " + decryptedQr.startsWith("iVBORw0KGgo"));
+            
+            // **STEP 1: PROCESS SALE TRANSACTION**
+            System.out.println("🔄 Processing website sale transaction...");
+            
+            // Mark item as used (sold)
+            item.setStatus(StockPool.StockItem.ItemStatus.USED);
+            item.setUsedDate(java.time.LocalDateTime.now());
+            item.setAssignedToUserEmail(retailerEmail);
+            
+            // Update pool quantities
+            pool.setAvailableQuantity(pool.getAvailableQuantity() - 1);
+            pool.setUsedQuantity(pool.getUsedQuantity() + 1);
+            
+            // Save updated pool
+            stockPoolRepository.save(pool);
+            System.out.println("✅ Stock updated - Available: " + pool.getAvailableQuantity());
+            
+            // Create retailer order record for website sale
+            RetailerOrder retailerOrder = new RetailerOrder();
+            retailerOrder.setRetailerId(getUserFromAuthentication(authentication).getId());
+            retailerOrder.setOrderNumber("WEB-ESIM-" + System.currentTimeMillis());
+            retailerOrder.setTotalAmount(BigDecimal.valueOf(price));
+            retailerOrder.setCurrency("NOK");
+            retailerOrder.setStatus(RetailerOrder.OrderStatus.COMPLETED);
+            retailerOrder.setPaymentStatus(RetailerOrder.PaymentStatus.COMPLETED);
+            retailerOrder.setPaymentMethod("CREDIT_LIMIT");
+            retailerOrder.setCreatedDate(LocalDateTime.now());
+            retailerOrder.setLastModifiedDate(LocalDateTime.now());
+            retailerOrder.setCreatedBy(retailerEmail);
+            
+            // Create order item for eSIM
+            RetailerOrder.OrderItem orderItem = new RetailerOrder.OrderItem();
+            orderItem.setProductId(productId != null ? productId : poolId);
+            orderItem.setProductName(pool.getName());
+            orderItem.setProductType("ESIM");
+            orderItem.setCategory("esim");
+            orderItem.setQuantity(1);
+            orderItem.setUnitPrice(BigDecimal.valueOf(price));
+            orderItem.setRetailPrice(BigDecimal.valueOf(price));
+            orderItem.setNetworkProvider(networkProvider != null ? networkProvider : pool.getNetworkProvider());
+            
+            List<RetailerOrder.OrderItem> items = new ArrayList<>();
+            items.add(orderItem);
+            retailerOrder.setItems(items);
+            
+            // Save retailer order
+            RetailerOrder savedOrder = retailerOrderRepository.save(retailerOrder);
+            System.out.println("✅ Website eSIM order recorded: " + savedOrder.getOrderNumber());
+            
+            // **STEP 2: PROCESS CREDIT LIMIT AND KICKBACK**
+            User retailer = getUserFromAuthentication(authentication);
+            if (retailer != null) {
+                try {
+                    System.out.println("🔄 Processing credit limit for website sale...");
+                    
+                    // Deduct from credit limit using service
+                    try {
+                        retailerLimitService.useCredit(retailer.getId(), BigDecimal.valueOf(price), 
+                            savedOrder.getId(), "Website eSIM Sale - " + networkProvider + " to " + customerEmail);
+                        System.out.println("✅ Credit limit updated - Amount deducted: " + price);
+                    } catch (Exception creditEx) {
+                        System.err.println("⚠️ Credit limit update failed: " + creditEx.getMessage());
+                    }
+                    
+                    // Process kickback campaigns
+                    try {
+                        String retailerName = retailer.getFirstName() + " " + retailer.getLastName();
+                        kickbackCampaignService.processRetailerSale(
+                            retailerEmail, 
+                            retailerName,
+                            savedOrder.getId(),
+                            BigDecimal.valueOf(price)
+                        );
+                        System.out.println("✅ Kickback campaigns processed");
+                    } catch (Exception kickbackEx) {
+                        System.err.println("⚠️ Kickback processing failed: " + kickbackEx.getMessage());
+                    }
+                } catch (Exception e) {
+                    System.err.println("⚠️ Credit/Kickback processing error: " + e.getMessage());
+                }
+            }
+            
+            // **STEP 3: SEND EMAIL WITH QR CODE**
+            System.out.println("📧 Sending eSIM QR code via email (Website)...");
+            
+            // Use the actual ICCID from the item's serial number or itemData
+            String actualIccid = iccid != null ? iccid : 
+                                (item.getSerialNumber() != null ? item.getSerialNumber() : 
+                                (item.getItemData() != null ? stockService.decryptData(item.getItemData()) : "N/A"));
+            
+            System.out.println("   📋 Email data - ICCID: " + actualIccid);
+            System.out.println("   📋 Email data - QR length: " + decryptedQr.length());
+            
+            emailService.sendEsimQrCodeEmail(
+                customerEmail, 
+                customerFirstName, 
+                customerLastName,
+                networkProvider != null ? networkProvider : pool.getNetworkProvider(),
+                "eSIM", // Always use "eSIM" as the product type for display
+                decryptedQr,
+                actualIccid
+            );
+            
+            System.out.println("✅ Website: eSIM sold and QR code sent via email successfully");
+            
+            // Build response with all sale details
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", "eSIM sold and sent to " + customerEmail + " successfully");
+            response.put("saleId", savedOrder.getId());
+            response.put("customerEmail", customerEmail);
+            response.put("iccid", actualIccid);
+            response.put("networkProvider", networkProvider != null ? networkProvider : pool.getNetworkProvider());
+            response.put("productType", productType != null ? productType : "eSIM");
+            response.put("price", price);
+            response.put("qrCodeImage", decryptedQr); // Include QR code for potential receipt display
+            
+            // Include updated credit information
+            if (retailer != null) {
+                try {
+                    RetailerLimit updatedLimit = retailerLimitRepository.findByRetailer(retailer).orElse(null);
+                    if (updatedLimit != null) {
+                        Map<String, Object> creditInfo = new HashMap<>();
+                        creditInfo.put("availableCredit", updatedLimit.getAvailableCredit());
+                        creditInfo.put("usedCredit", updatedLimit.getUsedCredit());
+                        creditInfo.put("creditLimit", updatedLimit.getCreditLimit());
+                        
+                        double usagePercentage = 0.0;
+                        if (updatedLimit.getCreditLimit().compareTo(BigDecimal.ZERO) > 0) {
+                            usagePercentage = updatedLimit.getUsedCredit()
+                                .divide(updatedLimit.getCreditLimit(), 4, java.math.RoundingMode.HALF_UP)
+                                .multiply(BigDecimal.valueOf(100)).doubleValue();
+                        }
+                        creditInfo.put("creditUsagePercentage", usagePercentage);
+                        
+                        response.put("updatedCredit", creditInfo);
+                        System.out.println("📊 Updated credit info included in response");
+                    }
+                } catch (Exception ex) {
+                    System.err.println("⚠️ Could not include updated credit info: " + ex.getMessage());
+                }
+            }
+            
+            return ResponseEntity.ok(response);
+            
+        } catch (IllegalArgumentException e) {
+            System.err.println("❌ Validation error: " + e.getMessage());
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", false);
+            response.put("message", e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error sending eSIM via email (Website): " + e.getMessage());
+            e.printStackTrace();
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", false);
+            response.put("message", "Failed to send eSIM via email: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
     }
 
     /**

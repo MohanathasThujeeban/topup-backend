@@ -83,6 +83,32 @@ public class AdminController {
     }
 
     /**
+     * Get all products from the product repository
+     * This returns ALL products regardless of stock status
+     */
+    @GetMapping("/products/all")
+    public ResponseEntity<Map<String, Object>> getAllProducts() {
+        try {
+            List<Product> allProducts = productRepository.findAll();
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("products", allProducts);
+            response.put("count", allProducts.size());
+            response.put("message", "All products fetched successfully");
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error fetching all products: ", e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("error", "Failed to fetch products: " + e.getMessage());
+            error.put("products", new ArrayList<>());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+    }
+
+    /**
      * Get all users with pagination and filtering
      */
     @GetMapping("/users")
@@ -489,6 +515,61 @@ public class AdminController {
             response.put("productMarginRates", productMarginRates);
             response.put("totalProducts", productMarginRates.size());
             response.put("retailerEmail", retailerEmail);
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+        }
+    }
+
+    /**
+     * Set margin rate for ALL products for a retailer
+     */
+    @PostMapping("/retailers/margin-rate/all-products")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Map<String, Object>> setMarginRateForAllProducts(@Valid @RequestBody Map<String, Object> request) {
+        try {
+            String retailerEmail = (String) request.get("retailerEmail");
+            Double marginRate = Double.valueOf(request.get("marginRate").toString());
+            String notes = (String) request.get("notes");
+            
+            // Get all products from stock
+            List<Product> allProducts = adminService.getAllProductsFromStock();
+            
+            int updatedCount = 0;
+            for (Product product : allProducts) {
+                try {
+                    // Get pool name from product metadata or use category as fallback
+                    String poolName = "General";
+                    if (product.getMetadata() != null && product.getMetadata().containsKey("poolName")) {
+                        poolName = (String) product.getMetadata().get("poolName");
+                    } else if (product.getCategory() != null) {
+                        poolName = product.getCategory().toString();
+                    }
+                    
+                    adminService.updateRetailerMarginRate(
+                        retailerEmail,
+                        marginRate,
+                        product.getId(),
+                        product.getName(),
+                        poolName
+                    );
+                    updatedCount++;
+                } catch (Exception e) {
+                    System.err.println("Failed to set margin for product " + product.getId() + ": " + e.getMessage());
+                }
+            }
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", "Margin rate set for all products");
+            response.put("retailerEmail", retailerEmail);
+            response.put("marginRate", marginRate);
+            response.put("productsUpdated", updatedCount);
+            response.put("totalProducts", allProducts.size());
             
             return ResponseEntity.ok(response);
         } catch (Exception e) {
