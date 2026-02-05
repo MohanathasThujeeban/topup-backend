@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Low Credit Alert - Telelys</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f3f4f6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+  
+  <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f3f4f6;">
+    <tr>
+      <td style="padding: 20px 0;">
+        
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" align="center" style="margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+          
+          <!-- Header with Alert Background -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); padding: 40px 30px; text-align: center; position: relative;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 36px; font-weight: 700; letter-spacing: -0.5px;">Telelys</h1>
+              <p style="margin: 15px 0 0; color: #fee2e2; font-size: 18px; font-weight: 600;">⚠️ Credit Balance Alert</p>
+            </td>
+          </tr>
+
+          <!-- Alert Section -->
+          <tr>
+            <td style="padding: 35px 30px; background-color: #fef2f2; border-bottom: 3px solid #dc2626;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                <tr>
+                  <td style="width: 50px; text-align: center; padding-right: 20px;">
+                    <div style="font-size: 40px; line-height: 1;">🔔</div>
+                  </td>
+                  <td style="vertical-align: middle;">
+                    <h2 style="margin: 0 0 8px; color: #7f1d1d; font-size: 22px; font-weight: 600;">Your Credit Balance is Low</h2>
+                    <p style="margin: 0; color: #b91c1c; font-size: 14px; font-weight: 500;">Immediate action may be required</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Main Content -->
+          <tr>
+            <td style="padding: 40px 30px;">
+              <p style="margin: 0 0 25px; color: #374151; font-size: 16px; line-height: 1.6;">
+                Hello <strong>%RETAILER_NAME%</strong>,
+              </p>
+              
+              <p style="margin: 0 0 30px; color: #4b5563; font-size: 15px; line-height: 1.7;">
+                We wanted to alert you that your available credit balance with Telelys has reached a critical level. Your current balance is below the recommended threshold and requires your immediate attention.
+              </p>
+
+              <!-- Credit Details Card -->
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f9fafb; border-left: 4px solid #dc2626; border-radius: 8px; margin-bottom: 30px;">
+                <tr>
+                  <td style="padding: 25px;">
+                    
+                    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom: 20px;">
+                      <tr>
+                        <td style="padding-bottom: 8px;">
+                          <p style="margin: 0; color: #6b7280; font-size: 13px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px;">Total Credit Limit</p>
+                        </td>
+                        <td style="text-align: right; padding-bottom: 8px;">
+                          <p style="margin: 0; color: #111827; font-size: 13px; font-weight: 500;">NOK %CREDIT_LIMIT%</p>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td colspan="2" style="border-bottom: 1px solid #e5e7eb;"></td>
+                      </tr>
+                    </table>
+
+                    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom: 20px;">
+                      <tr>
+                        <td style="padding: 8px 0;">
+                          <p style="margin: 0; color: #6b7280; font-size: 13px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px;">Credit Used</p>
+                        </td>
+                        <td style="text-align: right; padding: 8px 0;">
+                          <p style="margin: 0; color: #dc2626; font-size: 13px; font-weight: 600;">NOK %USED_CREDIT%</p>
+                        </td>
+                      </tr>
+                    </table>
+
+                    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #fee2e2; border-radius: 6px; padding: 15px;">
+                      <tr>
+                        <td style="width: 50%;">
+                          <p style="margin: 0; color: #7f1d1d; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Available Balance</p>
+                        </td>
+                        <td style="text-align: right;">
+                          <p style="margin: 0; color: #7f1d1d; font-size: 22px; font-weight: 700;">NOK %AVAILABLE_CREDIT%</p>
+                        </td>
+                      </tr>
+                    </table>
+
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Progress Bar -->
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom: 30px;">
+                <tr>
+                  <td style="padding-bottom: 8px;">
+                    <p style="margin: 0; color: #6b7280; font-size: 12px; font-weight: 500;">Credit Usage: <strong>%USAGE_PERCENTAGE%</strong></p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="background-color: #e5e7eb; border-radius: 10px; padding: 0; height: 16px; overflow: hidden;">
+                    <div style="background: linear-gradient(90deg, #dc2626 0%, #991b1b 100%); height: 16px; width: %USAGE_PERCENTAGE%; border-radius: 10px;"></div>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Alert Message -->
+              <div style="background-color: #fecaca; border-left: 4px solid #dc2626; border-radius: 6px; padding: 16px; margin-bottom: 30px;">
+                <p style="margin: 0; color: #7f1d1d; font-size: 14px; line-height: 1.6;">
+                  <strong>⚠️ Important:</strong> If your available balance falls below NOK 100 or reaches zero, you will not be able to place new orders until you make a payment or contact us to increase your credit limit.
+                </p>
+              </div>
+
+              <!-- Call to Action -->
+              <p style="margin: 0 0 20px; color: #374151; font-size: 15px; line-height: 1.6;">
+                <strong>What you can do:</strong>
+              </p>
+
+              <ul style="margin: 0 0 30px; padding-left: 20px; color: #4b5563; font-size: 14px; line-height: 1.8;">
+                <li style="margin-bottom: 10px;"><strong>Make a Payment:</strong> Transfer funds to your account to restore your available balance and avoid service disruption.</li>
+                <li style="margin-bottom: 10px;"><strong>Request Limit Increase:</strong> Contact our sales team to discuss increasing your credit limit for future transactions.</li>
+                <li style="margin-bottom: 10px;"><strong>View Dashboard:</strong> Log in to your account to monitor your credit usage and transaction history.</li>
+              </ul>
+
+              <!-- CTA Button -->
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom: 30px;">
+                <tr>
+                  <td style="text-align: center;">
+                    <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                      <tr>
+                        <td style="background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%); border-radius: 8px; padding: 14px 32px;">
+                          <a href="%DASHBOARD_URL%" style="color: #ffffff; text-decoration: none; font-weight: 600; font-size: 15px; display: inline-block;">View Dashboard</a>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Contact Information -->
+              <div style="background-color: #f3f4f6; border-radius: 8px; padding: 20px; margin-bottom: 30px;">
+                <p style="margin: 0 0 12px; color: #374151; font-size: 14px; font-weight: 600;">Need Assistance?</p>
+                <p style="margin: 0; color: #6b7280; font-size: 13px; line-height: 1.6;">
+                  📧 Email: <a href="mailto:%SUPPORT_EMAIL%" style="color: #2563eb; text-decoration: none;">%SUPPORT_EMAIL%</a><br>
+                  📞 Phone: +47 XXX XX XXX<br>
+                  💬 Live Chat: Available on your dashboard
+                </p>
+              </div>
+
+              <p style="margin: 0; color: #6b7280; font-size: 13px; line-height: 1.6;">
+                This is an automated notification. Please do not reply to this email. For any inquiries, please use the contact information provided above.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f9fafb; padding: 25px 30px; text-align: center; border-top: 1px solid #e5e7eb;">
+              <p style="margin: 0 0 12px; color: #6b7280; font-size: 12px;"><strong>Telelys - Your Trusted Partner</strong></p>
+              <p style="margin: 0; color: #9ca3af; font-size: 10px;">© 2026 Telelys. All rights reserved.</p>
+            </td>
+          </tr>
+
+        </table>
+
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>

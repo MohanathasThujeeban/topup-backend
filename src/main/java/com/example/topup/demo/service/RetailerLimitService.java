@@ -1,22 +1,32 @@
 package com.example.topup.demo.service;
 
-import com.example.topup.demo.entity.RetailerLimit;
-import com.example.topup.demo.entity.RetailerLimit.CreditTransaction;
-import com.example.topup.demo.entity.User;
-import com.example.topup.demo.repository.RetailerLimitRepository;
-import com.example.topup.demo.repository.UserRepository;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.Optional;
+import java.util.stream.Collectors;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
-import java.time.LocalDateTime;
-import java.util.*;
-import java.util.stream.Collectors;
+import com.example.topup.demo.entity.RetailerLimit;
+import com.example.topup.demo.entity.RetailerLimit.CreditTransaction;
+import com.example.topup.demo.entity.User;
+import com.example.topup.demo.repository.RetailerLimitRepository;
+import com.example.topup.demo.repository.UserRepository;
 
 @Service
 public class RetailerLimitService {
+
+    private static final Logger log = LoggerFactory.getLogger(RetailerLimitService.class);
 
     @Autowired
     private RetailerLimitRepository retailerLimitRepository;
@@ -100,10 +110,11 @@ public class RetailerLimitService {
         limit.useCredit(amount, orderId, description);
         retailerLimitRepository.save(limit);
 
-        // Check if low credit alert needed
+        // Check if low credit alert needed (below 100 NOK or at limit)
+        BigDecimal lowCreditThreshold = new BigDecimal("100");
         if (limit.isSendLowCreditAlert() && 
-            limit.getLowCreditThreshold() != null &&
-            limit.getAvailableCredit().compareTo(limit.getLowCreditThreshold()) <= 0) {
+            (limit.getAvailableCredit().compareTo(lowCreditThreshold) < 0 || 
+             limit.getAvailableCredit().compareTo(BigDecimal.ZERO) <= 0)) {
             sendLowCreditAlert(limit);
         }
     }
@@ -265,16 +276,33 @@ public class RetailerLimitService {
     private void sendLowCreditAlert(RetailerLimit limit) {
         try {
             String retailerEmail = limit.getRetailer().getEmail();
-            String subject = "Low Credit Alert";
-            String message = String.format(
-                "Your available credit ($%s) has fallen below the threshold ($%s). " +
-                "Please make a payment to continue using our services.",
-                limit.getAvailableCredit().toString(),
-                limit.getLowCreditThreshold().toString()
+            String retailerName = limit.getRetailer().getFirstName() + " " + limit.getRetailer().getLastName();
+            
+            // Calculate usage percentage
+            BigDecimal usagePercent = calculateOverallUtilization(
+                limit.getCreditLimit(), 
+                limit.getAvailableCredit()
             );
-            emailService.sendEmail(retailerEmail, subject, message);
+            
+            // Format numbers for email display
+            String creditLimit = String.format("%.2f", limit.getCreditLimit());
+            String usedCredit = String.format("%.2f", limit.getUsedCredit().add(limit.getOutstandingAmount()));
+            String availableCredit = String.format("%.2f", limit.getAvailableCredit());
+            String usagePercentage = String.format("%.1f%%", usagePercent);
+            
+            // Send HTML email with enhanced template
+            emailService.sendLowCreditAlertEmail(
+                retailerEmail,
+                retailerName,
+                creditLimit,
+                usedCredit,
+                availableCredit,
+                usagePercentage
+            );
+            
+            log.info("Low credit alert sent to: " + retailerEmail + " (Available: NOK " + availableCredit + ")");
         } catch (Exception e) {
-            System.err.println("Failed to send low credit alert: " + e.getMessage());
+            log.error("Failed to send low credit alert: " + e.getMessage(), e);
         }
     }
 
@@ -310,11 +338,58 @@ public class RetailerLimitService {
     // Scheduled task to send low credit alerts
     @Scheduled(cron = "0 0 10 * * *") // Run daily at 10 AM
     public void sendLowCreditAlerts() {
-        List<RetailerLimit> retailersNeedingAlert = getRetailersNeedingCreditAlert();
+        log.info("Running scheduled low credit alerts check...");
         
-        for (RetailerLimit limit : retailersNeedingAlert) {
-            sendLowCreditAlert(limit);
+        // Get all active retailer limits
+        List<RetailerLimit> allLimits = retailerLimitRepository.findAll();
+        BigDecimal lowCreditThreshold = new BigDecimal("100");
+        int alertsSent = 0;
+        
+        for (RetailerLimit limit : allLimits) {
+            // Check if retailer is active and has low credit (below 100 NOK)
+            if (limit.getStatus() == RetailerLimit.LimitStatus.ACTIVE &&
+                limit.isSendLowCreditAlert() &&
+                limit.getAvailableCredit().compareTo(lowCreditThreshold) < 0) {
+                sendLowCreditAlert(limit);
+                alertsSent++;
+            }
         }
+        
+        log.info("Low credit alerts check completed. Sent " + alertsSent + " alerts.");
+    }
+    
+    // Manual method to trigger low credit alert for a specific retailer
+    public void triggerLowCreditAlertForRetailer(String retailerId) {
+        RetailerLimit limit = retailerLimitRepository.findByRetailer_Id(retailerId)
+                .orElseThrow(() -> new NoSuchElementException("Retailer limit not found"));
+        
+        BigDecimal lowCreditThreshold = new BigDecimal("100");
+        if (limit.getAvailableCredit().compareTo(lowCreditThreshold) < 0) {
+            log.info("Manually triggering low credit alert for retailer: " + retailerId);
+            sendLowCreditAlert(limit);
+        } else {
+            log.info("Retailer " + retailerId + " has sufficient credit (" + 
+                     limit.getAvailableCredit() + " NOK). No alert needed.");
+        }
+    }
+    
+    // Manual method to trigger alerts for all retailers with low credit
+    public int triggerAllLowCreditAlerts() {
+        log.info("Manually triggering low credit alerts for all retailers...");
+        List<RetailerLimit> allLimits = retailerLimitRepository.findAll();
+        BigDecimal lowCreditThreshold = new BigDecimal("100");
+        int alertsSent = 0;
+        
+        for (RetailerLimit limit : allLimits) {
+            if (limit.getStatus() == RetailerLimit.LimitStatus.ACTIVE &&
+                limit.getAvailableCredit().compareTo(lowCreditThreshold) < 0) {
+                sendLowCreditAlert(limit);
+                alertsSent++;
+            }
+        }
+        
+        log.info("Manual alert trigger completed. Sent " + alertsSent + " alerts.");
+        return alertsSent;
     }
 
     // Get transaction history for a retailer

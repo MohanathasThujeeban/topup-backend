@@ -1949,4 +1949,102 @@ a:hover{text-decoration:underline}
             appName, appName
         );
     }
+
+    /**
+     * Send low credit alert email to retailer (HTML template)
+     */
+    public void sendLowCreditAlertEmail(String toEmail, String retailerName, 
+                                       String creditLimit, String usedCredit, 
+                                       String availableCredit, String usagePercentage) {
+        try {
+            String htmlContent = generateLowCreditAlertHtml(
+                retailerName, creditLimit, usedCredit, availableCredit, usagePercentage
+            );
+            
+            sendHtmlEmail(
+                toEmail,
+                "⚠️ Low Credit Alert - Immediate Action Required",
+                htmlContent
+            );
+            
+            log.info("Low credit alert email sent to: " + toEmail);
+        } catch (Exception e) {
+            log.error("Failed to send low credit alert email", e);
+        }
+    }
+
+    /**
+     * Generate low credit alert HTML content
+     */
+    private String generateLowCreditAlertHtml(String retailerName, String creditLimit, 
+                                             String usedCredit, String availableCredit, 
+                                             String usagePercentage) {
+        try {
+            Resource resource = new ClassPathResource("templates/low-credit-alert.html");
+            InputStream inputStream = resource.getInputStream();
+            String template = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+            
+            template = template.replace("%RETAILER_NAME%", retailerName != null ? retailerName : "Valued Partner");
+            template = template.replace("%CREDIT_LIMIT%", creditLimit != null ? creditLimit : "N/A");
+            template = template.replace("%USED_CREDIT%", usedCredit != null ? usedCredit : "N/A");
+            template = template.replace("%AVAILABLE_CREDIT%", availableCredit != null ? availableCredit : "N/A");
+            template = template.replace("%USAGE_PERCENTAGE%", usagePercentage != null ? usagePercentage : "0%");
+            template = template.replace("%DASHBOARD_URL%", appUrl + "/retailer/dashboard");
+            template = template.replace("%SUPPORT_EMAIL%", supportEmail);
+            
+            return template;
+        } catch (Exception e) {
+            log.warn("Could not load low credit alert template, using fallback", e);
+            return generateLowCreditAlertFallbackHtml(retailerName, creditLimit, usedCredit, availableCredit, usagePercentage);
+        }
+    }
+
+    /**
+     * Fallback HTML for low credit alert
+     */
+    private String generateLowCreditAlertFallbackHtml(String retailerName, String creditLimit, 
+                                                     String usedCredit, String availableCredit, 
+                                                     String usagePercentage) {
+        return String.format("""
+            <html>
+            <body style="font-family: Arial, sans-serif; padding: 20px; background-color: #f3f4f6;">
+                <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; padding: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                    <h1 style="color: #dc2626; margin: 0 0 20px 0;">⚠️ Low Credit Alert</h1>
+                    <p style="font-size: 16px; color: #374151;">Hello <strong>%s</strong>,</p>
+                    <p style="color: #4b5563;">Your credit balance has reached a critical level and requires immediate attention.</p>
+                    
+                    <div style="background: #f9fafb; border-left: 4px solid #dc2626; padding: 20px; margin: 20px 0; border-radius: 6px;">
+                        <table style="width: 100%%; border-collapse: collapse;">
+                            <tr><td style="padding: 8px 0; color: #6b7280;">Total Credit Limit:</td><td style="text-align: right; font-weight: bold;">NOK %s</td></tr>
+                            <tr><td style="padding: 8px 0; color: #6b7280;">Credit Used:</td><td style="text-align: right; font-weight: bold; color: #dc2626;">NOK %s</td></tr>
+                            <tr><td style="padding: 8px 0; color: #6b7280;">Available Balance:</td><td style="text-align: right; font-weight: bold; color: #7f1d1d; font-size: 18px;">NOK %s</td></tr>
+                            <tr><td style="padding: 8px 0; color: #6b7280;">Usage:</td><td style="text-align: right; font-weight: bold;">%s</td></tr>
+                        </table>
+                    </div>
+                    
+                    <div style="background: #fecaca; border-left: 4px solid #dc2626; padding: 15px; margin: 20px 0; border-radius: 6px;">
+                        <p style="margin: 0; color: #7f1d1d; font-size: 14px;"><strong>⚠️ Important:</strong> If your balance falls below NOK 100, you cannot place new orders.</p>
+                    </div>
+                    
+                    <p style="color: #374151; margin-top: 20px;"><strong>Actions to take:</strong></p>
+                    <ul style="color: #4b5563;">
+                        <li>Make a payment to restore your balance</li>
+                        <li>Request a credit limit increase</li>
+                        <li>Contact support for assistance</li>
+                    </ul>
+                    
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="%s/retailer/dashboard" style="display: inline-block; background: linear-gradient(135deg, #2563eb 0%%, #1e40af 100%%); color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: 600;">View Dashboard</a>
+                    </div>
+                    
+                    <p style="color: #6b7280; font-size: 13px; margin-top: 30px;">Need help? Contact us at <a href="mailto:%s" style="color: #2563eb;">%s</a></p>
+                    <p style="color: #9ca3af; font-size: 12px; text-align: center; margin-top: 20px;">© 2026 %s. All rights reserved.</p>
+                </div>
+            </body>
+            </html>
+            """, 
+            retailerName, creditLimit, usedCredit, availableCredit, usagePercentage,
+            appUrl, supportEmail, supportEmail, appName
+        );
+    }
 }

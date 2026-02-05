@@ -1,18 +1,30 @@
 package com.example.topup.demo.controller;
 
-import com.example.topup.demo.entity.RetailerLimit;
-import com.example.topup.demo.entity.RetailerLimit.CreditTransaction;
-import com.example.topup.demo.entity.User;
-import com.example.topup.demo.service.RetailerLimitService;
+import java.math.BigDecimal;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.Optional;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
-import java.math.BigDecimal;
-import java.util.*;
+import com.example.topup.demo.entity.RetailerLimit;
+import com.example.topup.demo.entity.RetailerLimit.CreditTransaction;
+import com.example.topup.demo.entity.User;
+import com.example.topup.demo.service.RetailerLimitService;
 
 @RestController
 @RequestMapping("/api/admin/retailers")
@@ -358,6 +370,47 @@ public class RetailerLimitController {
         } catch (Exception e) {
             response.put("success", false);
             response.put("message", "Failed to check credit: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
+    }
+    
+    // Trigger low credit alert for a specific retailer
+    @PostMapping("/{retailerId}/trigger-alert")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Map<String, Object>> triggerLowCreditAlert(@PathVariable String retailerId) {
+        Map<String, Object> response = new HashMap<>();
+        
+        try {
+            retailerLimitService.triggerLowCreditAlertForRetailer(retailerId);
+            
+            response.put("success", true);
+            response.put("message", "Low credit alert triggered for retailer: " + retailerId);
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            response.put("success", false);
+            response.put("message", "Failed to trigger alert: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
+    }
+    
+    // Trigger low credit alerts for all retailers
+    @PostMapping("/trigger-all-alerts")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Map<String, Object>> triggerAllLowCreditAlerts() {
+        Map<String, Object> response = new HashMap<>();
+        
+        try {
+            int alertsSent = retailerLimitService.triggerAllLowCreditAlerts();
+            
+            response.put("success", true);
+            response.put("alertsSent", alertsSent);
+            response.put("message", "Sent " + alertsSent + " low credit alerts");
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            response.put("success", false);
+            response.put("message", "Failed to trigger alerts: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
         }
     }
